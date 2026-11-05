@@ -68,7 +68,7 @@
   .choice b { font-size: 18px; color: var(--pool); }
   .choice span { color: var(--muted); font-size: 15px; }
 
-  input[type=text], input[type=number], input[type=time], input[type=url], input:not([type]) {
+  input[type=text], input[type=number], input[type=time], input[type=url], input[type=date], input:not([type]), select {
     font: inherit; width: 100%; margin-top: 4px; padding: 11px 12px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink);
   }
   label { display: block; font-size: 15px; color: var(--muted); }
@@ -112,6 +112,25 @@
   .compare img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 12px; background: var(--pool-soft); }
   .compare figcaption { font-size: 14px; color: var(--muted); margin-top: 4px; }
 
+  /* food */
+  h3 { font-size: 16px; margin: 14px 0 4px; }
+  h3 .sub { font-weight: 400; }
+  .care { background: var(--pool-soft); border-radius: 12px; padding: 10px 12px; color: var(--ink); margin: 4px 0 0; }
+  .seg { display: flex; gap: 6px; margin-bottom: 8px; }
+  .seg button { flex: 1; font: inherit; padding: 9px; min-height: 44px; border-radius: 10px; border: 2px solid var(--pool); background: transparent; color: var(--pool); font-weight: 700; cursor: pointer; }
+  .seg button[aria-pressed=true] { background: var(--pool); color: var(--on-pool); }
+  ol.plan { list-style: none; padding: 0; margin: 0 0 12px; }
+  ol.plan > li { border-top: 1px solid var(--line); padding: 10px 0; }
+  ol.plan > li.is-today .plan-head b { color: var(--pool); }
+  .plan-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .plan-head b { font-family: var(--num); font-size: 19px; }
+  .slot { display: grid; grid-template-columns: 82px 1fr; align-items: center; gap: 8px; font-size: 15px; padding: 2px 0; }
+  .slot select { margin: 0; padding: 8px 10px; min-width: 0; }
+  ol.steps { padding-left: 20px; margin: 6px 0 10px; }
+  ol.steps li { padding: 4px 0; }
+  details summary .sub { font-weight: 400; }
+  .got { text-decoration: line-through; color: var(--muted); }
+  .meal-empty { list-style: none; padding: 6px 0; }
   .tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 5; }
   .tabs button { flex: 1; font: inherit; font-size: 15px; background: none; border: 0; color: var(--muted); padding: 10px 4px 14px; min-height: 60px; cursor: pointer; position: relative; }
   .tabs button[aria-current=page] { color: var(--pool); font-weight: 700; }
@@ -126,6 +145,7 @@
 <nav class="tabs" aria-label="Sections">
   <button data-tab="today" aria-current="page">Today</button>
   <button data-tab="train">Train</button>
+  <button data-tab="food">Food</button>
   <button data-tab="progress">Progress</button>
   <button data-tab="settings">Settings</button>
 </nav>

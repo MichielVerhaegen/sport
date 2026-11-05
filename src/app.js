@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS } from './content.js';
+import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
 const STORE = 'lane-state-v1';
@@ -34,6 +34,8 @@ const DEFAULTS = () => ({
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
+  diet: { start: '', bowl: 'large' },
+  mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
 
 function load() {
@@ -41,7 +43,7 @@ function load() {
     const raw = localStorage.getItem(STORE);
     if (!raw) return DEFAULTS();
     const s = JSON.parse(raw); const d = DEFAULTS();
-    return { ...d, ...s, profile: { ...d.profile, ...s.profile }, settings: { ...d.settings, ...s.settings } };
+    return { ...d, ...s, profile: { ...d.profile, ...s.profile }, settings: { ...d.settings, ...s.settings }, diet: { ...d.diet, ...s.diet } };
   } catch { return DEFAULTS(); }
 }
 let S = load();
@@ -178,6 +180,55 @@ function microSlots(date) {
     .filter((m) => m.start);
 }
 
+/* ---------------- food: diet, meal plan, shopping list ---------------- */
+const recipeById = (id) => RECIPES.find((r) => r.id === id);
+const OWN = { id: 'own', title: 'Own bowl', kcal: 0, protein: 0, own: true };
+const mealOf = (id) => (id === 'own' ? OWN : recipeById(id));
+function dietDay() { return S.diet.start ? Math.round((today() - parseYmd(S.diet.start)) / 864e5) + 1 : 0; }
+function plannedMeals(date) {
+  const day = S.mealPlan[ymd(date)] || {};
+  return SLOTS.map(([slot, label]) => ({ slot, label, meal: day[slot] ? mealOf(day[slot]) : null }));
+}
+function dayTotals(date) {
+  return plannedMeals(date).reduce((t, m) => (m.meal && !m.meal.own ? { kcal: t.kcal + m.meal.kcal, protein: t.protein + m.meal.protein } : t), { kcal: 0, protein: 0 });
+}
+const weekPlanCount = (monday) => { let n = 0; for (let i = 0; i < 7; i++) n += plannedMeals(addDays(monday, i)).filter((m) => m.meal).length; return n; };
+function autofillWeek(monday) {
+  const use = {};
+  for (let i = 0; i < 7; i++) plannedMeals(addDays(monday, i)).forEach((m) => { if (m.meal && !m.meal.own) use[m.meal.id] = (use[m.meal.id] || 0) + 1; });
+  for (let i = 0; i < 7; i++) {
+    const k = ymd(addDays(monday, i)); const day = (S.mealPlan[k] = S.mealPlan[k] || {});
+    for (const [slot] of SLOTS) {
+      if (day[slot]) continue;
+      const prev = i > 0 ? (S.mealPlan[ymd(addDays(monday, i - 1))] || {})[slot] : null;
+      const pick = RECIPES.filter((r) => r.slots.includes(slot))
+        .sort((a, b) => (use[a.id] || 0) - (use[b.id] || 0) || (a.id === prev) - (b.id === prev))[0];
+      if (pick) { day[slot] = pick.id; use[pick.id] = (use[pick.id] || 0) + 1; }
+    }
+  }
+}
+const PLURAL = { bag: 'bags', serving: 'servings', packet: 'packets', cup: 'cups' };
+function fmtQty(q, u) {
+  const n = Math.round(q * 10) / 10;
+  if (u === 'pc') return String(n);
+  return `${n} ${n > 1 && PLURAL[u] ? PLURAL[u] : u}`;
+}
+const fmtIng = ([n, q, u, note]) => (q == null ? `${n}, ${note}` : `${fmtQty(q, u)} ${n}${note ? ` (${note})` : ''}`);
+function shoppingList(monday) {
+  const from = ymd(today()); const items = {}; const pantry = new Set();
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(monday, i); if (ymd(date) < from) continue;
+    plannedMeals(date).forEach(({ meal }) => {
+      if (!meal || meal.own) return;
+      meal.ingredients.forEach(([n, q, u]) => {
+        if (q == null) { pantry.add(n); return; }
+        const key = `${n}|${u}`; items[key] = items[key] || { key, n, u, q: 0 }; items[key].q += q;
+      });
+    });
+  }
+  return { items: Object.values(items).sort((a, b) => a.n.localeCompare(b.n)), pantry: [...pantry].sort() };
+}
+
 /* ---------------- motivation ---------------- */
 function motivation(st, seed) {
   const lines = [`You're ${st.pct}% of the way to ${st.goal} kg.`, `${st.toGo} kg to go. Steady beats fast.`];
@@ -234,6 +285,7 @@ function buildSchedule() {
     if (wd === 0) {
       push(atTime(date, S.settings.weighTime), 'Sunday weigh-in', 'Once a week, same time. Add a photo if you like. Future-you will want it.');
       if (!S.weeks[ymd(addDays(date, 1))]) push(atTime(date, '18:00'), 'Pick your week', 'Training week or food week? One tap, and it is decided.');
+      if (!weekPlanCount(addDays(mondayOf(date), 7))) push(atTime(date, '17:30'), 'Plan your meals', 'Next week has no meals planned. Auto-fill it in one tap and get the shopping list.');
     }
     if (wd === 1) {
       const prevMonday = addDays(date, -7);
@@ -317,7 +369,7 @@ async function importBackup(file) {
 }
 
 /* ---------------- UI helpers ---------------- */
-let tab = 'today'; let openDay = null; let showMissForm = false;
+let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0;
 const app = document.getElementById('app');
 function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
@@ -406,6 +458,20 @@ function viewToday() {
   }
   h += `</section>`;
 
+  // meals
+  const dd = dietDay(); const tips = S.dietTips[k] || {}; const log = S.mealLog[k] || {};
+  h += `<section><h2>Today's meals</h2>`;
+  h += `<p class="sub">${dd >= 1 && dd <= DIET.days ? `Day ${dd} of ${DIET.days} of the filling diet. ` : ''}One bowl per meal, filled to the top. No snacking.</p><ul class="micro">`;
+  plannedMeals(d).forEach(({ slot, label, meal }) => {
+    if (!meal) { h += `<li class="sub meal-empty">${label}: not planned</li>`; return; }
+    h += `<li><label><input type="checkbox" data-action="meal" data-slot="${slot}" ${log[slot] ? 'checked' : ''}><span><b>${label}</b> ${esc(meal.title)}${meal.own ? '' : `, ${meal.kcal} kcal, ${meal.protein} g protein`}</span></label></li>`;
+  });
+  h += `</ul><details><summary>Extra strategies</summary>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="soda" ${tips.soda ? 'checked' : ''}> Zero-calorie fizzy drink with each meal</label>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="broth" ${tips.broth ? 'checked' : ''}> Broth with one meal</label>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="utensil" ${tips.utensil ? 'checked' : ''}> Small utensil (chopsticks or teaspoon)</label></details>
+    <button class="link" data-action="goFood">Plan meals and shopping list</button></section>`;
+
   // home day
   const home = isHome(k); const slots = microSlots(d);
   h += `<section><h2>Home day moves</h2>`;
@@ -453,6 +519,79 @@ function viewTrain() {
     <li>Knee pain above 3 out of 10: stop that exercise for today.</li>
     <li>Neck training only with a trainer showing you the form.</li>
     <li>Aim to lose at most about 1 kg a week so it's fat, not muscle.</li></ul></section>`;
+  return h;
+}
+
+function viewFood() {
+  const d = today(); const day = dietDay(); const mon = addDays(mondayOf(d), planOffset * 7);
+  const bowl = DIET.bowls[S.diet.bowl] || DIET.bowls.large;
+  let h = `<header><h1>Food</h1><p class="sub">The 30-day filling diet: lose fat without going hungry.</p></header>`;
+
+  // diet status
+  h += `<div class="lane">`;
+  if (!day) {
+    h += `<p><b>Ready when you are.</b> Three meals a day, each from one big bowl, filled to the top with approved foods.</p>
+      <button class="btn" data-action="startDiet">Start day 1 today</button>`;
+  } else if (day <= DIET.days) {
+    h += `<div class="lane-head"><span class="pct">${day}<small>/${DIET.days}</small></span><span class="lane-cap">days of the filling diet<br><b>${bowl.label}</b></span></div>
+      <div class="rope"><div class="rope-done" style="width:${Math.round((day / DIET.days) * 100)}%"></div><div class="swimmer" style="left:${Math.round((day / DIET.days) * 100)}%"></div></div>`;
+  } else {
+    h += `<p class="ok">30 days done.</p><p class="sub">Weigh in, then keep going with the same bowl, or restart.</p>
+      <button class="btn ghost" data-action="startDiet">Restart from today</button>`;
+  }
+  h += `</div>`;
+  h += `<p class="sub care">${esc(DIET.careNote)}</p>`;
+
+  // planner
+  const totalPlanned = weekPlanCount(mon);
+  h += `<section><h2>Meal plan</h2>
+    <div class="seg" role="group" aria-label="Week">
+      <button data-action="planWeek" data-off="0" aria-pressed="${planOffset === 0}">This week</button>
+      <button data-action="planWeek" data-off="1" aria-pressed="${planOffset === 1}">Next week</button></div>
+    <ol class="plan">`;
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(mon, i); const k = ymd(date); const t = dayTotals(date); const plan = S.mealPlan[k] || {};
+    h += `<li class="${k === ymd(d) ? 'is-today' : ''}"><div class="plan-head"><b>${DAYS[date.getDay()].slice(0, 3)} ${date.getDate()}</b>${t.kcal ? `<span class="sub">${t.kcal} kcal, ${t.protein} g protein</span>` : ''}</div>`;
+    SLOTS.forEach(([slot, label]) => {
+      h += `<label class="slot"><span>${label}</span><select data-action="plan" data-date="${k}" data-slot="${slot}" aria-label="${label} on ${DAYS[date.getDay()]} ${date.getDate()}">
+        <option value="">Not planned</option>
+        ${RECIPES.map((r) => `<option value="${r.id}" ${plan[slot] === r.id ? 'selected' : ''}>${esc(r.title)}</option>`).join('')}
+        <option value="own" ${plan[slot] === 'own' ? 'selected' : ''}>Own bowl (approved foods)</option></select></label>`;
+    });
+    h += `</li>`;
+  }
+  h += `</ol><div class="row"><button class="btn" data-action="autofill">Auto-fill empty meals</button>${totalPlanned ? '<button class="btn ghost" data-action="clearWeek">Clear week</button>' : ''}</div></section>`;
+
+  // shopping list
+  const shop = shoppingList(mon); const checked = S.shop[ymd(mon)] || {};
+  h += `<section><h2>Shopping list</h2>`;
+  if (!shop.items.length) h += `<p class="sub">Plan some meals and the list builds itself${planOffset === 0 ? ' (from today onward)' : ''}.</p>`;
+  else {
+    h += `<ul class="micro">${shop.items.map((it) => `<li><label><input type="checkbox" data-action="shop" data-week="${ymd(mon)}" data-key="${esc(it.key)}" ${checked[it.key] ? 'checked' : ''}><span class="${checked[it.key] ? 'got' : ''}">${esc(it.n)}, <b>${fmtQty(it.q, it.u)}</b></span></label></li>`).join('')}</ul>`;
+    if (shop.pantry.length) h += `<p class="sub">Have at hand: ${esc(shop.pantry.join(', ').toLowerCase())}.</p>`;
+    h += `<button class="link" data-action="shopReset" data-week="${ymd(mon)}">Uncheck everything</button>`;
+  }
+  h += `</section>`;
+
+  // recipes
+  h += `<section><h2>Recipes</h2><p class="sub">Each makes one bowl.</p>`;
+  RECIPES.forEach((r) => {
+    h += `<details><summary>${esc(r.title)}<span class="sub"> ${r.kcal} kcal, ${r.protein} g protein</span></summary>
+      <p class="sub">${r.kcal} kcal · ${r.protein} g protein · ${r.carbs} g carbs · ${r.fat} g fat</p>
+      <ul class="plain">${r.ingredients.map((i) => `<li>${esc(fmtIng(i))}</li>`).join('')}</ul>
+      <ol class="steps">${r.steps.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol></details>`;
+  });
+  h += `</section>`;
+
+  // guide
+  h += `<section><h2>Diet guide</h2>
+    <details><summary>The three rules</summary><ol class="steps">${DIET.rules.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol>
+      <p class="sub">Your bowl: ${esc(bowl.label)}, ${esc(bowl.detail)}. Change it in Settings.</p></details>
+    <details><summary>Approved foods</summary>${DIET.foods.map((c) => `<h3>${esc(c.name)} <span class="sub">${esc(c.amount)}</span></h3>
+      ${c.groups.map(([label, items]) => `<p>${label ? `<b>${esc(label)}:</b> ` : ''}${items.map(esc).join(', ')}.</p>`).join('')}`).join('')}</details>
+    <details><summary>Extra strategies</summary><ol class="steps">${DIET.strategies.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol></details>
+    <details><summary>FAQ</summary>${DIET.faq.map(([q, a]) => `<p><b>${esc(q)}</b><br>${esc(a)}</p>`).join('')}</details>
+    <p class="sub">Based on the 30-Day Filling Diet by Built With Science. For personal use.</p></section>`;
   return h;
 }
 
@@ -527,13 +666,16 @@ function viewSettings() {
     ${field('settings.bridgeKey', 'Key', 'text', 'autocomplete="off"')}
     <label class="toggle"><input type="checkbox" data-bind="settings.addMicro" ${s.addMicro ? 'checked' : ''}> Also add home-day move breaks to my calendar</label>
     <button class="btn ghost" data-action="refreshCal">Test and sync</button></div></section>
+  <section><h2>Filling diet</h2><div class="form">
+    <label>Bowl size<select data-bind="diet.bowl">${Object.entries(DIET.bowls).map(([id, b]) => `<option value="${id}" ${S.diet.bowl === id ? 'selected' : ''}>${esc(b.label)}</option>`).join('')}</select></label>
+    ${field('diet.start', 'Day 1 of the 30 days (empty = not started)', 'date')}</div></section>
   <section><h2>Backup</h2><p class="sub">Your data lives only on this phone. Export a backup now and then.</p>
     <div class="row"><button class="btn ghost" data-action="export">Export backup</button><label class="btn ghost file-btn">Restore backup<input id="import" type="file" accept="application/json,.json"></label></div>
     <button class="link danger" data-action="reset">Erase all data</button></section>`;
 }
 
 function render() {
-  const views = { today: viewToday, train: viewTrain, progress: viewProgress, settings: viewSettings };
+  const views = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, settings: viewSettings };
   app.innerHTML = views[tab]();
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
   app.querySelectorAll('img[data-photo]').forEach(async (img) => { const src = await photos.get(img.dataset.photo); if (src) img.src = src; });
@@ -560,6 +702,15 @@ app.addEventListener('click', async (e) => {
   else if (a === 'session') { S.sessions[k] = { done: true, kind: el.dataset.kind }; toast('Counted'); }
   else if (a === 'sessionUndo') { delete S.sessions[k]; }
   else if (a === 'goDay') { openDay = el.dataset.day; tab = 'train'; render(); return; }
+  else if (a === 'goFood') { tab = 'food'; planOffset = 0; render(); window.scrollTo(0, 0); return; }
+  else if (a === 'startDiet') { S.diet.start = k; toast('Day 1. One bowl, filled to the top.'); }
+  else if (a === 'planWeek') { planOffset = +el.dataset.off; render(); return; }
+  else if (a === 'autofill') { autofillWeek(addDays(mondayOf(today()), planOffset * 7)); toast('Meals filled in'); }
+  else if (a === 'clearWeek') {
+    if (!confirm('Clear all meals this week?')) return;
+    for (let i = 0; i < 7; i++) delete S.mealPlan[ymd(addDays(addDays(mondayOf(today()), planOffset * 7), i))];
+  }
+  else if (a === 'shopReset') { delete S.shop[el.dataset.week]; }
   else if (a === 'perm') { askPermission(); return; }
   else if (a === 'weigh') {
     const kg = parseFloat(document.getElementById('kg').value);
@@ -600,6 +751,14 @@ app.addEventListener('change', async (e) => {
     return;
   }
   const a = el.dataset.action;
+  if (a === 'plan') {
+    const day = (S.mealPlan[el.dataset.date] = S.mealPlan[el.dataset.date] || {});
+    if (el.value) day[el.dataset.slot] = el.value; else delete day[el.dataset.slot];
+    save(); render(); return;
+  }
+  if (a === 'meal') { S.mealLog[k] = S.mealLog[k] || {}; S.mealLog[k][el.dataset.slot] = el.checked; save(); return; }
+  if (a === 'tip') { S.dietTips[k] = S.dietTips[k] || {}; S.dietTips[k][el.dataset.tip] = el.checked; save(); return; }
+  if (a === 'shop') { S.shop[el.dataset.week] = S.shop[el.dataset.week] || {}; S.shop[el.dataset.week][el.dataset.key] = el.checked; save(); render(); return; }
   if (a === 'micro') { S.micro[k] = S.micro[k] || [false, false, false]; S.micro[k][+el.dataset.i] = el.checked; save(); return; }
   if (a === 'homeToggle') { S.homeManual[k] = el.checked; save(); render(); return; }
   if (a === 'rehearsed') { S.rehearsed[el.dataset.key] = el.checked; save(); render(); return; }

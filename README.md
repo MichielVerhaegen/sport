@@ -40,6 +40,7 @@ What it does: it reads your meetings and your Office/Home working location, plac
 - **Fresh start**: a Monday message after a slipped week.
 - **Training**: Mon short upper body only if you rehearsed Sunday, Tue musical, Wed calisthenics (Kevin Zhang style), Thu upper body (Trainer Winny style), Fri knee-friendly legs and grip, Sat swim, Sun rest and weigh-in.
 - **Progress**: weekly weight, % towards your goal, BMI, streak, graph and first-vs-latest photos. A warning shows if you lose more than about 1 kg a week.
+- **Food**: the 30-Day Filling Diet (Built With Science): day counter, weekly meal planner (3 meals a day from 5 recipes or your own bowl), auto-fill, shopping list that adds up the week's ingredients, daily meal check-offs on the Today tab, approved foods, rules and FAQ. A Sunday reminder nudges you to plan next week. Recipes and diet text: `src/content.js`.
 - **Data**: stays on your phone only. Use **Settings → Export backup** now and then.
 
 ## Change things
