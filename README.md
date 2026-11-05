@@ -38,7 +38,7 @@ Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, eac
 - Pick your bowl size (1.9 L or 1.4 L) in Settings. Check the diet with your doctor or dietitian before you start.
 
 ### Progress
-Weekly weigh-in with an optional photo, percentage towards your goal, kg lost and to go, BMI, streak, a graph, and your first photo next to your latest. A warning shows if you lose more than about 1 kg a week.
+Weekly weigh-in with an optional photo, percentage towards your goal, kg lost and to go, BMI, streak and a graph. A warning shows if you lose more than about 1 kg a week. **Photos**: add one any day (not only at a weigh-in). Progress shows your first, your lowest-weight and your latest photo side by side, and an overlay where you slide between first and now. Take them in the same spot and pose.
 
 ### Settings
 Your start, goal and height; reminder times; training at home by default; habit tricks (a reward you only allow while training, a habit stack); Google Calendar; diet bowl size and start date; backup; app updates (which build you have, check now).

@@ -39,7 +39,7 @@ const DEFAULTS = () => ({
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
-  google: null, update: null, homeWorkout: {},
+  google: null, update: null, homeWorkout: {}, pics: [],
   diet: { start: '', bowl: 'large' },
   mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
@@ -97,6 +97,24 @@ function compressImage(file) {
 
 /* ---------------- derived numbers ---------------- */
 const sortedWeights = () => [...S.weights].sort((a, b) => (a.date < b.date ? -1 : 1));
+
+function weightAt(date) {
+  const ws = sortedWeights(); if (!ws.length) return S.profile.start;
+  const before = ws.filter((w) => w.date <= date);
+  return (before.length ? before[before.length - 1] : ws[0]).kg;
+}
+// Every photo: from weigh-ins and from separate uploads, oldest first.
+function allPhotos() {
+  const list = S.weights.filter((w) => w.photoId).map((w) => ({ id: w.photoId, date: w.date, kg: w.kg, src: 'weight' }));
+  S.pics.forEach((p) => list.push({ id: p.id, date: p.date, kg: weightAt(p.date), src: 'pic' }));
+  return list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : 1));
+}
+function photoMilestones() {
+  const all = allPhotos(); if (!all.length) return null;
+  const first = all[0]; const current = all[all.length - 1];
+  const lowest = all.reduce((m, p) => (p.kg <= m.kg ? p : m), all[0]);
+  return { all, first, lowest, current };
+}
 
 function stats() {
   const p = S.profile; const ws = sortedWeights();
@@ -490,6 +508,7 @@ async function addWeekToCalendar() {
 async function exportBackup() {
   const pics = {};
   for (const w of S.weights) if (w.photoId) { const p = await photos.get(w.photoId); if (p) pics[w.photoId] = p; }
+  for (const x of S.pics) { const p = await photos.get(x.id); if (p) pics[x.id] = p; }
   const json = JSON.stringify({ app: 'lane', version: 1, state: { ...S, google: null }, photos: pics });
   const name = `lane-backup-${ymd(today())}.json`;
   if (isNative) {
@@ -529,7 +548,7 @@ async function openUpdate() {
 }
 
 /* ---------------- UI helpers ---------------- */
-let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0;
+let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0; let overlayOpacity = 0.5;
 const app = document.getElementById('app');
 function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
@@ -828,12 +847,22 @@ function viewProgress() {
     <div><dt>To go</dt><dd>${st.toGo}</dd></div><div><dt>BMI</dt><dd>${st.bmi.toFixed(1)}</dd></div><div><dt>Streak</dt><dd>${st.streak}</dd></div></dl>
     ${st.rateWarn ? `<p class="warn">You're losing more than about 1 kg a week. Keep protein high and mention it to your bariatric team, so it's fat coming off and not muscle.</p>` : ''}
     ${chart(ws, st)}</section>`;
+  const pm = photoMilestones();
   h += `<section><h2>How far you've come</h2>`;
-  if (withPhotos.length >= 2) {
-    const a = withPhotos[0]; const b = withPhotos[withPhotos.length - 1];
-    h += `<div class="compare"><figure><img data-photo="${a.photoId}" alt="Photo from ${shortDate(a.date)}"><figcaption>${shortDate(a.date)}, ${a.kg} kg</figcaption></figure>
-      <figure><img data-photo="${b.photoId}" alt="Photo from ${shortDate(b.date)}"><figcaption>${shortDate(b.date)}, ${b.kg} kg</figcaption></figure></div>`;
-  } else h += `<p class="sub">Add a photo with your weigh-ins. On a day you doubt yourself, this is where you'll see the difference.</p>`;
+  h += `<div class="weigh"><label class="file">Add a photo (any day)<input id="pic" type="file" accept="image/*" capture="environment"></label>
+    <label>Taken on<input id="picDate" type="date" value="${ymd(today())}" max="${ymd(today())}"></label>
+    <button class="btn ghost" data-action="addPic">Save photo</button></div>`;
+  if (pm) {
+    const card = (p, label) => `<figure><img data-photo="${p.id}" alt="${label} photo, ${shortDate(p.date)}"><figcaption><b>${label}</b><br>${shortDate(p.date)}, ${p.kg} kg</figcaption></figure>`;
+    const same = (x, y) => x.id === y.id;
+    h += `<div class="compare three">${card(pm.first, 'First')}${same(pm.lowest, pm.first) || same(pm.lowest, pm.current) ? '' : card(pm.lowest, 'Lowest')}${same(pm.current, pm.first) ? '' : card(pm.current, 'Now')}</div>`;
+    if (!same(pm.first, pm.current)) {
+      h += `<p class="sub">Overlay: slide to fade between your first photo and now. Take photos in the same spot and pose for the best effect.</p>
+        <div class="overlay"><img data-photo="${pm.first.id}" alt="First photo"><img id="overlayTop" data-photo="${pm.current.id}" alt="Current photo" style="opacity:${overlayOpacity}"></div>
+        <div class="fader"><span>${shortDate(pm.first.date)}</span><input id="fade" type="range" min="0" max="100" value="${Math.round(overlayOpacity * 100)}" aria-label="Fade between first and current photo"><span>${shortDate(pm.current.date)}</span></div>`;
+    } else h += `<p class="sub">Add a second photo later and you can fade between then and now.</p>`;
+    h += `<details><summary>All photos (${pm.all.length})</summary><ul class="log">${pm.all.slice().reverse().map((p) => `<li><span>${shortDate(p.date)}</span><span>${p.kg} kg${p.src === 'weight' ? ', weigh-in' : ''}</span>${p.src === 'pic' ? `<button class="link" data-action="delPic" data-id="${p.id}">Delete</button>` : '<span class="sub">with weigh-in</span>'}</li>`).join('')}</ul></details>`;
+  } else h += `<p class="sub">Add a photo now and then. On a day you doubt yourself, this is where you'll see the difference.</p>`;
   if (ws.length) {
     h += `<details><summary>All weigh-ins (${ws.length})</summary><ul class="log">${ws.slice().reverse().map((w) => `<li><span>${shortDate(w.date)}</span><span>${w.kg} kg${w.photoId ? ', photo' : ''}</span><button class="link" data-action="delWeight" data-date="${w.date}">Delete</button></li>`).join('')}</ul></details>`;
   }
@@ -934,6 +963,16 @@ app.addEventListener('click', async (e) => {
     S.weights.push({ date: k, kg, photoId: photoId || (old && old.photoId) });
     toast('Weigh-in saved');
   }
+  else if (a === 'addPic') {
+    const file = document.getElementById('pic').files[0]; const date = document.getElementById('picDate').value || k;
+    if (!file) { toast('Choose a photo first'); return; }
+    try { const id = `x-${date}-${Date.now()}`; await photos.set(id, await compressImage(file)); S.pics.push({ id, date }); toast('Photo saved'); }
+    catch { toast('Photo could not be saved'); return; }
+  }
+  else if (a === 'delPic') {
+    if (!confirm('Delete this photo?')) return;
+    photos.del(el.dataset.id); S.pics = S.pics.filter((p) => p.id !== el.dataset.id);
+  }
   else if (a === 'delWeight') {
     if (!confirm('Delete this weigh-in?')) return;
     const w = S.weights.find((x) => x.date === el.dataset.date); if (w && w.photoId) photos.del(w.photoId);
@@ -955,6 +994,10 @@ app.addEventListener('click', async (e) => {
   else if (a === 'reset') { if (!confirm('Erase everything in Lane? This cannot be undone.')) return; S = DEFAULTS(); }
   else return;
   save(); render();
+});
+
+app.addEventListener('input', (e) => {
+  if (e.target.id === 'fade') { overlayOpacity = e.target.value / 100; const t = document.getElementById('overlayTop'); if (t) t.style.opacity = overlayOpacity; }
 });
 
 app.addEventListener('change', async (e) => {

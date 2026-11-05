@@ -119,6 +119,12 @@
   .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .compare figure { margin: 0; }
   .compare img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 12px; background: var(--pool-soft); }
+  .compare.three { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); margin-bottom: 14px; }
+  .compare.three img { aspect-ratio: 3/4; }
+  .overlay { position: relative; width: 100%; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; background: var(--pool-soft); margin-bottom: 8px; }
+  .overlay img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .fader { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); font-family: var(--num); font-weight: 600; }
+  .fader input { flex: 1; accent-color: var(--pool); height: 32px; }
   .compare figcaption { font-size: 14px; color: var(--muted); margin-top: 4px; }
 
   /* food */
