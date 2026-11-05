@@ -51,7 +51,7 @@ Everything stays on your phone. Nothing is sent anywhere except your own Google 
 ### Build the APK
 Every push to `main` runs the **Build APK** workflow on GitHub Actions (about 3 minutes). It publishes a GitHub **release** `build-N` with `lane.apk` attached, and bakes build number N into the app; that's how installed apps notice a new build. You can also start a build by hand (**Actions → Build APK → Run workflow**); on branches other than `main` it only produces the **lane-apk** artifact, no release.
 
-The signing key lives in `keystore/lane.keystore`, so every build installs over the previous one. The first build created it; if your organization blocks workflows from pushing, allow it under **Settings → Actions → General → Workflow permissions → Read and write**.
+The signing key lives in `keystore/lane.keystore`; the workflow signs every build with it and checks the signature, so every build installs over the previous one. If Android ever says *package conflicts with an existing package*, the installed app was signed with another key: export a backup in Settings, uninstall, install the new build, restore the backup. The first build created it; if your organization blocks workflows from pushing, allow it under **Settings → Actions → General → Workflow permissions → Read and write**.
 
 ### Google sign-in (one-time, already done)
 The app is registered with Google so that users only have to tap **Sign in with Google**. If you ever need to redo it, for example for a new signing key:

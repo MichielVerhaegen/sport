@@ -66,11 +66,22 @@ jobs:
           fi
           cp keystore/lane.keystore ~/.android/debug.keystore
 
-      - name: Sync and build
+      - name: Sync and build (signed with the repo key)
         run: |
           npx cap sync android
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/keystore/lane.keystore" \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
+
+      - name: Verify the APK is signed with the repo key
+        run: |
+          want=$(keytool -list -v -keystore keystore/lane.keystore -storepass android | grep SHA1 | head -1 | awk '{print $2}')
+          got=$(keytool -printcert -jarfile android/app/build/outputs/apk/debug/app-debug.apk | grep SHA1 | head -1 | awk '{print $2}')
+          echo "repo key: $want"; echo "apk key:  $got"
+          [ "$want" = "$got" ] || { echo "::error::APK signed with the wrong key"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
