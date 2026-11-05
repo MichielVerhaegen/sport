@@ -32,6 +32,19 @@ jobs:
       - name: Create Android project
         run: npx cap add android
 
+      - name: Allow the Google sign-in redirect (eu.michiel.lane:/oauth2redirect)
+        run: |
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          f = ('<intent-filter><action android:name="android.intent.action.VIEW"/>'
+               '<category android:name="android.intent.category.DEFAULT"/>'
+               '<category android:name="android.intent.category.BROWSABLE"/>'
+               '<data android:scheme="eu.michiel.lane"/></intent-filter>')
+          assert '</activity>' in s
+          open(p, 'w').write(s.replace('</activity>', f + '</activity>', 1))
+          PY
+
       - name: Stable signing key (so updates install over the old version)
         run: |
           mkdir -p keystore ~/.android

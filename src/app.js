@@ -2,6 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { Browser } from '@capacitor/browser';
+import { App as CapApp } from '@capacitor/app';
+import { GOOGLE_CLIENT_ID, REDIRECT_URI } from './config.js';
 import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
@@ -34,6 +37,7 @@ const DEFAULTS = () => ({
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
+  google: null,
   diet: { start: '', bowl: 'large' },
   mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
@@ -317,19 +321,143 @@ async function reschedule() {
   } catch (e) { console.warn('Scheduling failed', e); }
 }
 
-/* ---------------- calendar bridge (Google Apps Script) ---------------- */
+/* ---------------- Google sign-in and calendar ---------------- */
+const TAG = '#lane-app';
+const SCOPES = 'openid email https://www.googleapis.com/auth/calendar.events';
+const OAUTH = 'lane-oauth';
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const randomString = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
+const signedIn = () => !!(S.google && S.google.refresh);
+const legacyBridge = () => !!(S.settings.bridgeUrl && S.settings.bridgeKey);
+const calendarReady = () => signedIn() || legacyBridge();
+
+async function googleSignIn() {
+  if (!isNative) { toast('Sign-in works in the installed app.'); return; }
+  if (!GOOGLE_CLIENT_ID) { toast('Google sign-in is not set up yet. See the README.'); return; }
+  const verifier = randomString(48); const state = randomString(16);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  localStorage.setItem(OAUTH, JSON.stringify({ verifier, state }));
+  const q = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: 'code', scope: SCOPES,
+    code_challenge: challenge, code_challenge_method: 'S256', state, access_type: 'offline', prompt: 'consent',
+  });
+  await Browser.open({ url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` });
+}
+
+async function tokenRequest(params) {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, ...params }),
+  });
+  const data = await res.json();
+  if (!res.ok) { const e = new Error(data.error_description || data.error || 'Google sign-in failed'); e.code = data.error; throw e; }
+  return data;
+}
+
+async function handleRedirect(url) {
+  if (!url || !url.startsWith(REDIRECT_URI)) return;
+  try { await Browser.close(); } catch {}
+  const q = new URL(url.replace(REDIRECT_URI, 'https://x/cb')).searchParams;
+  let saved; try { saved = JSON.parse(localStorage.getItem(OAUTH)); } catch {}
+  localStorage.removeItem(OAUTH);
+  if (q.get('error')) { toast(q.get('error') === 'access_denied' ? 'Sign-in cancelled.' : `Google said: ${q.get('error')}`); return; }
+  if (!saved || saved.state !== q.get('state') || !q.get('code')) { toast('Sign-in could not be verified. Try again.'); return; }
+  try {
+    const t = await tokenRequest({ grant_type: 'authorization_code', code: q.get('code'), code_verifier: saved.verifier, redirect_uri: REDIRECT_URI });
+    let email = '';
+    try { email = JSON.parse(atob(t.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email || ''; } catch {}
+    S.google = { access: t.access_token, expires: Date.now() + t.expires_in * 1000, refresh: t.refresh_token || (S.google && S.google.refresh) || '', email };
+    if (!S.google.refresh) throw new Error('Google did not allow ongoing access. Try signing in again.');
+    save(); toast(`Signed in${email ? ` as ${email}` : ''}`); render(); refreshCalendar(true);
+  } catch (e) { toast(e.message); }
+}
+
+function googleSignOut() {
+  const t = S.google && (S.google.refresh || S.google.access);
+  if (t) fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: t }) }).catch(() => {});
+  S.google = null; S.calendar = null; save(); render(); toast('Signed out');
+}
+
+async function accessToken() {
+  if (!signedIn()) throw new Error('Sign in with Google in Settings first.');
+  if (S.google.expires > Date.now() + 60000) return S.google.access;
+  try {
+    const t = await tokenRequest({ grant_type: 'refresh_token', refresh_token: S.google.refresh });
+    S.google.access = t.access_token; S.google.expires = Date.now() + t.expires_in * 1000; save();
+    return S.google.access;
+  } catch (e) {
+    if (e.code === 'invalid_grant') { S.google = null; save(); render(); throw new Error('Google sign-in expired. Please sign in again.'); }
+    throw e;
+  }
+}
+
+async function gcal(path, opts = {}) {
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/${path}`, {
+    ...opts, headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data.error && data.error.message) || 'Google Calendar answered with an error.');
+  return data;
+}
+
+async function googleWeek(days) {
+  const start = today(); const end = addDays(start, days);
+  const map = {}; const order = [];
+  for (let i = 0; i < days; i++) { const k = ymd(addDays(start, i)); map[k] = { date: k, location: null, ooo: false, busy: [] }; order.push(k); }
+  const datesOf = (ev) => {
+    if (ev.start.date) { const out = []; for (let d = parseYmd(ev.start.date); d < parseYmd(ev.end.date); d = addDays(d, 1)) out.push(ymd(d)); return out; }
+    return [ymd(new Date(ev.start.dateTime))];
+  };
+  let pageToken;
+  do {
+    const q = new URLSearchParams({ timeMin: start.toISOString(), timeMax: end.toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
+    ['default', 'workingLocation', 'outOfOffice', 'focusTime'].forEach((t) => q.append('eventTypes', t));
+    if (pageToken) q.set('pageToken', pageToken);
+    const r = await gcal(`events?${q}`);
+    (r.items || []).forEach((ev) => {
+      if (!ev.start || ev.status === 'cancelled') return;
+      if (ev.eventType === 'workingLocation') {
+        const t = ev.workingLocationProperties && ev.workingLocationProperties.type;
+        const loc = t === 'homeOffice' ? 'home' : t === 'officeLocation' ? 'office' : 'other';
+        datesOf(ev).forEach((k) => { if (map[k]) map[k].location = loc; });
+        return;
+      }
+      if (ev.transparency === 'transparent') return;
+      if ((ev.attendees || []).some((a) => a.self && a.responseStatus === 'declined')) return;
+      if (ev.start.date) { if (ev.eventType === 'outOfOffice') datesOf(ev).forEach((k) => { if (map[k]) map[k].ooo = true; }); return; }
+      const k = ymd(new Date(ev.start.dateTime));
+      if (map[k]) map[k].busy.push({ s: ev.start.dateTime, e: ev.end.dateTime, lane: String(ev.description || '').includes(TAG) });
+    });
+    pageToken = r.nextPageToken;
+  } while (pageToken);
+  return { ok: true, days: order.map((k) => map[k]) };
+}
+
+async function googleAdd({ title, start, end, desc }) {
+  const q = new URLSearchParams({ timeMin: start.toISOString(), timeMax: end.toISOString(), singleEvents: 'true', maxResults: '50' });
+  const existing = await gcal(`events?${q}`);
+  if ((existing.items || []).some((ev) => ev.summary === title && ev.start.dateTime && new Date(ev.start.dateTime).getTime() === start.getTime())) return { skipped: true };
+  await gcal('events', { method: 'POST', body: JSON.stringify({ summary: title, description: `${desc || ''}\n\n${TAG}`, start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } }) });
+  return { created: true };
+}
+
+// Legacy: Google Apps Script bridge, kept for anyone who already set it up.
 async function bridge(params) {
   const { bridgeUrl, bridgeKey } = S.settings;
-  if (!bridgeUrl || !bridgeKey) throw new Error('Calendar is not connected yet. Add the link and key in Settings.');
+  if (!bridgeUrl || !bridgeKey) throw new Error('Calendar is not connected yet. Sign in with Google in Settings.');
   const q = new URLSearchParams({ ...params, key: bridgeKey });
   const res = await fetch(`${bridgeUrl}?${q}`, { redirect: 'follow' });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'The calendar link answered with an error.');
   return data;
 }
+const calendarWeek = (days) => (signedIn() ? googleWeek(days) : bridge({ action: 'week', days }));
+const calendarAdd = (it) => (signedIn() ? googleAdd(it)
+  : bridge({ action: 'add', title: it.title, start: it.start.toISOString(), end: it.end.toISOString(), desc: it.desc }));
+
 async function refreshCalendar(silent) {
   try {
-    const data = await bridge({ action: 'week', days: 10 });
+    const data = await calendarWeek(10);
     S.calendar = { fetchedAt: Date.now(), days: data.days }; save(); render();
     if (!silent) toast('Calendar updated');
   } catch (e) { if (!silent) toast(e.message); }
@@ -343,10 +471,7 @@ async function addWeekToCalendar() {
     if (slot) items.push({ title: `Lane: ${w.title}`, start: slot.start, end: slot.end, desc: w.exercises.map((e) => `${e[0]}: ${e[1]}`).join('\n') });
     if (S.settings.addMicro) microSlots(date).forEach((m) => items.push({ title: `Lane: ${m.ex[0]}`, start: m.start, end: new Date(m.start.getTime() + 10 * MIN), desc: m.ex[1] }));
     for (const it of items) {
-      try {
-        const r = await bridge({ action: 'add', title: it.title, start: it.start.toISOString(), end: it.end.toISOString(), desc: it.desc });
-        r.skipped ? skipped++ : created++;
-      } catch { failed++; }
+      try { const r = await calendarAdd(it); r.skipped ? skipped++ : created++; } catch { failed++; }
     }
   }
   toast(`${created} added${skipped ? `, ${skipped} already there` : ''}${failed ? `, ${failed} failed` : ''}`);
@@ -357,7 +482,7 @@ async function addWeekToCalendar() {
 async function exportBackup() {
   const pics = {};
   for (const w of S.weights) if (w.photoId) { const p = await photos.get(w.photoId); if (p) pics[w.photoId] = p; }
-  const json = JSON.stringify({ app: 'lane', version: 1, state: S, photos: pics });
+  const json = JSON.stringify({ app: 'lane', version: 1, state: { ...S, google: null }, photos: pics });
   const name = `lane-backup-${ymd(today())}.json`;
   if (isNative) {
     const f = await Filesystem.writeFile({ path: name, data: json, directory: Directory.Cache, encoding: Encoding.UTF8 });
@@ -371,7 +496,7 @@ async function importBackup(file) {
     const data = JSON.parse(await file.text());
     if (data.app !== 'lane') throw new Error();
     for (const [k, v] of Object.entries(data.photos || {})) await photos.set(k, v);
-    S = { ...DEFAULTS(), ...data.state }; save(); render(); toast('Backup restored');
+    S = { ...DEFAULTS(), ...data.state, google: S.google }; save(); render(); toast('Backup restored');
   } catch { toast('That file is not a Lane backup.'); }
 }
 
@@ -502,7 +627,7 @@ function viewToday() {
 }
 
 function viewTrain() {
-  const mon = mondayOf(today()); const ws = weekStatus(mon); const connected = S.settings.bridgeUrl && S.settings.bridgeKey;
+  const mon = mondayOf(today()); const ws = weekStatus(mon); const connected = calendarReady();
   let h = `<header><h1>This week</h1><p class="sub">${ws.mode === 'training' ? `Training week: ${ws.sessions} of 2 sessions done` : ws.mode === 'food' ? `Food week: ${ws.yes} of 5 good days` : 'Pick your week on the Today tab'}</p></header>`;
   h += `<ol class="week">`;
   for (let i = 0; i < 7; i++) {
@@ -520,7 +645,7 @@ function viewTrain() {
   if (connected) {
     h += `<p class="sub">${S.calendar ? `Last synced ${new Date(S.calendar.fetchedAt).toLocaleString()}.` : 'Not synced yet.'} Sessions are placed in free time around your meetings.</p>
       <div class="row"><button class="btn" data-action="addCal">Add next 7 days to calendar</button><button class="btn ghost" data-action="refreshCal">Sync now</button></div>`;
-  } else h += `<p class="sub">Connect your calendar in Settings so sessions fit around your meetings and home days are detected.</p>`;
+  } else h += `<p class="sub">Sign in with Google in Settings so sessions fit around your meetings and home days are detected.</p>`;
   h += `</section><section><h2>Ground rules</h2><ul class="plain">
     <li>Stop 1–2 reps before failure. Consistency beats heroics.</li>
     <li>Knee pain above 3 out of 10: stop that exercise for today.</li>
@@ -680,11 +805,16 @@ function viewSettings() {
     ${field('settings.bundle', 'Reward you only allow while training (temptation bundle)', 'text', 'placeholder="my favourite podcast"')}
     ${field('settings.stackAfter', 'Habit stack: after…', 'text', 'placeholder="my morning coffee"')}
     ${field('settings.stackDo', '…I do', 'text', 'placeholder="10 push-ups"')}</div></section>
-  <section><h2>Google Calendar</h2><p class="sub">Paste the web app link and key from your Apps Script setup (see the README).</p><div class="form">
-    ${field('settings.bridgeUrl', 'Web app link', 'url', 'placeholder="https://script.google.com/macros/s/…/exec"')}
-    ${field('settings.bridgeKey', 'Key', 'text', 'autocomplete="off"')}
-    <label class="toggle"><input type="checkbox" data-bind="settings.addMicro" ${s.addMicro ? 'checked' : ''}> Also add home-day move breaks to my calendar</label>
-    <button class="btn ghost" data-action="refreshCal">Test and sync</button></div></section>
+  <section><h2>Google Calendar</h2>
+    ${signedIn()
+      ? `<p>Signed in${S.google.email ? ` as <b>${esc(S.google.email)}</b>` : ''}.</p><p class="sub">Lane reads your meetings and working location, and adds sessions to your calendar.</p>
+         <div class="row"><button class="btn ghost" data-action="refreshCal">Sync now</button><button class="btn ghost" data-action="googleOut">Sign out</button></div>`
+      : `<p class="sub">Sign in once with your Google account so sessions fit around your meetings and home days are detected.</p>
+         <button class="btn" data-action="googleIn">Sign in with Google</button>`}
+    ${calendarReady() ? `<label class="toggle"><input type="checkbox" data-bind="settings.addMicro" ${s.addMicro ? 'checked' : ''}> Also add home-day move breaks to my calendar</label>` : ''}
+    <details><summary>Advanced: Apps Script link</summary><p class="sub">Only if you set up the old Apps Script bridge. Sign-in above is simpler.</p><div class="form">
+      ${field('settings.bridgeUrl', 'Web app link', 'url', 'placeholder="https://script.google.com/macros/s/…/exec"')}
+      ${field('settings.bridgeKey', 'Key', 'text', 'autocomplete="off"')}</div></details></section>
   <section><h2>Filling diet</h2><div class="form">
     <label>Bowl size<select data-bind="diet.bowl">${Object.entries(DIET.bowls).map(([id, b]) => `<option value="${id}" ${S.diet.bowl === id ? 'selected' : ''}>${esc(b.label)}</option>`).join('')}</select></label>
     ${field('diet.start', 'Day 1 of the 30 days (empty = not started)', 'date')}</div></section>
@@ -747,6 +877,8 @@ app.addEventListener('click', async (e) => {
     const w = S.weights.find((x) => x.date === el.dataset.date); if (w && w.photoId) photos.del(w.photoId);
     S.weights = S.weights.filter((x) => x.date !== el.dataset.date);
   }
+  else if (a === 'googleIn') { googleSignIn().catch((e) => toast(e.message)); return; }
+  else if (a === 'googleOut') { if (!confirm('Sign out of Google?')) return; googleSignOut(); return; }
   else if (a === 'refreshCal') { refreshCalendar(false); return; }
   else if (a === 'addCal') { addWeekToCalendar(); return; }
   else if (a === 'testNotif') {
@@ -792,11 +924,15 @@ async function start() {
   await checkPermission();
   if (!localStorage.getItem(STORE)) save();
   render(); reschedule();
-  if (S.settings.bridgeUrl && (!S.calendar || Date.now() - S.calendar.fetchedAt > 2 * 3600e3)) refreshCalendar(true);
+  if (isNative) {
+    CapApp.addListener('appUrlOpen', (e) => handleRedirect(e.url));
+    try { const l = await CapApp.getLaunchUrl(); if (l) handleRedirect(l.url); } catch {}
+  }
+  if (calendarReady() && (!S.calendar || Date.now() - S.calendar.fetchedAt > 2 * 3600e3)) refreshCalendar(true);
 }
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
   await checkPermission(); render(); reschedule();
-  if (S.settings.bridgeUrl && S.calendar && Date.now() - S.calendar.fetchedAt > 2 * 3600e3) refreshCalendar(true);
+  if (calendarReady() && S.calendar && Date.now() - S.calendar.fetchedAt > 2 * 3600e3) refreshCalendar(true);
 });
 start();

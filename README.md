@@ -18,20 +18,25 @@ The first build saves a signing key in `keystore/`, so later builds install over
 3. Open Lane and tap **Turn on reminders**.
 4. Recommended: in Android settings, set Lane's battery usage to *Unrestricted*, otherwise some phones delay reminders.
 
-## 3. Connect Google Calendar (optional, 5 minutes)
+## 3. Connect Google Calendar (sign in with Google)
 
-Lane uses a small Google Apps Script that runs under your own account, so no Google Cloud project is needed.
+**For everyone using the app:** open **Settings → Google Calendar → Sign in with Google**, pick your account, allow access. Done. No scripts, links or keys.
 
-1. Go to [script.google.com](https://script.google.com) and create a new project called *Lane bridge*.
-2. Replace the contents of `Code.gs` with `apps-script/Code.gs` from this folder.
-3. Left sidebar: **Services → +**, add **Google Calendar API**, keep the identifier `Calendar`.
-4. Select the `setup` function at the top, click **Run**, and approve access. Open **Execution log** and copy the key.
-5. **Deploy → New deployment → Web app**. Execute as: *Me*. Who has access: *Anyone*. Copy the web app link (ends in `/exec`).
-6. In Lane: **Settings → Google Calendar**, paste the link and key, then tap **Test and sync**.
+**One-time setup by the app owner** (about 10 minutes, so nobody else has to):
 
-"Anyone" only means anyone with the link *and* your key can reach it. If your Workspace admin doesn't allow "Anyone", the sync won't work: use the *I'm working from home today* toggle in the app instead.
+1. In [Google Cloud Console](https://console.cloud.google.com) create a project (for example *Lane*) and enable the **Google Calendar API**.
+2. **Google Auth Platform → Branding / Audience**: app name *Lane*. Choose **Internal** if you use Google Workspace (only your organization can sign in, no Google review needed). Otherwise choose External and add the people who will use it as test users.
+3. **Data access**: add the scope `.../auth/calendar.events`.
+4. **Clients → Create client → Android**:
+   - Package name: `eu.michiel.lane`
+   - SHA-1 fingerprint: `1C:ED:73:7D:83:59:75:F7:14:9C:62:CA:45:39:15:53:69:D1:CE:27` (the key in `keystore/lane.keystore`; if you ever replace that file, run `keytool -list -v -keystore keystore/lane.keystore -storepass android` for the new one).
+5. Copy the client ID (ends in `.apps.googleusercontent.com`) into `src/config.js` and push to `main`. The new APK has the sign-in button working.
 
-What it does: it reads your meetings and your Office/Home working location, places sessions in free time, finds three gaps for move breaks on home days, and adds sessions to your calendar when you tap **Add next 7 days to calendar**. Events it creates are tagged so they're never added twice.
+Workspace admins who restrict third-party apps must allow this client ID once (Admin console → Security → API controls).
+
+What it does: it reads your meetings and your Office/Home working location, places sessions in free time, finds three gaps for move breaks on home days, and adds sessions to your calendar when you tap **Add next 7 days to calendar**. Events it creates are tagged so they're never added twice. Sign-in tokens stay on your phone and are left out of backups. **Sign out** revokes access.
+
+The old Apps Script bridge (`apps-script/Code.gs`) still works under *Settings → Advanced* for anyone who already set it up.
 
 ## How the app works
 
