@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Browser } from '@capacitor/browser';
 import { App as CapApp } from '@capacitor/app';
 import { GOOGLE_CLIENT_ID, REDIRECT_URI, REPO } from './config.js';
@@ -549,6 +550,20 @@ async function openUpdate() {
 
 /* ---------------- UI helpers ---------------- */
 let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0; let overlayOpacity = 0.5;
+const pending = { weigh: null, pic: null }; // photos chosen but not saved yet (data URLs)
+
+// Native: Android's own camera/gallery prompt via the Camera plugin. Web: file input.
+async function pickPhoto(slot) {
+  if (!isNative) { document.getElementById(slot === 'weigh' ? 'photo' : 'pic').click(); return; }
+  try {
+    const r = await Camera.getPhoto({ resultType: CameraResultType.DataUrl, source: CameraSource.Prompt, quality: 80, width: 1000, height: 1000, correctOrientation: true, promptLabelHeader: 'Photo', promptLabelPhoto: 'Choose from gallery', promptLabelPicture: 'Take a photo' });
+    if (r && r.dataUrl) { pending[slot] = r.dataUrl; render(); }
+  } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not get the photo. Check that Lane may use the camera in Android settings.'); }
+}
+const photoPicker = (slot, label) => `<div class="pick">
+  <button class="btn ghost" data-action="pick" data-slot="${slot}">${pending[slot] ? 'Change photo' : label}</button>
+  ${pending[slot] ? `<img class="thumb" src="${pending[slot]}" alt="Chosen photo"><button class="link" data-action="unpick" data-slot="${slot}">Remove</button>` : ''}
+  <input id="${slot === 'weigh' ? 'photo' : 'pic'}" type="file" accept="image/*" hidden></div>`;
 const app = document.getElementById('app');
 function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
@@ -857,7 +872,7 @@ function viewProgress() {
   h += laneBlock(st);
   h += `<section><h2>Weigh-in</h2><div class="weigh">
     <label>Weight (kg)<input id="kg" type="number" inputmode="decimal" step="0.1" min="40" max="250" placeholder="${st.current}"></label>
-    <label class="file">Photo (optional)<input id="photo" type="file" accept="image/*" capture="environment"></label>
+    <label>Photo (optional)</label>${photoPicker('weigh', 'Take or choose a photo')}
     <button class="btn" data-action="weigh">Save weigh-in</button></div></section>`;
   h += `<section><h2>Numbers</h2><dl class="stats">
     <div><dt>Start</dt><dd>${st.start}</dd></div><div><dt>Now</dt><dd>${st.current}</dd></div><div><dt>Lost</dt><dd>${st.lost}</dd></div>
@@ -866,7 +881,7 @@ function viewProgress() {
     ${chart(ws, st)}</section>`;
   const pm = photoMilestones();
   h += `<section><h2>How far you've come</h2>`;
-  h += `<div class="weigh"><label class="file">Add a photo (any day)<input id="pic" type="file" accept="image/*" capture="environment"></label>
+  h += `<div class="weigh"><label>Add a photo (any day)</label>${photoPicker('pic', 'Take or choose a photo')}
     <label>Taken on<input id="picDate" type="date" value="${ymd(today())}" max="${ymd(today())}"></label>
     <button class="btn ghost" data-action="addPic">Save photo</button></div>`;
   if (pm) {
@@ -973,17 +988,22 @@ app.addEventListener('click', async (e) => {
     const kg = parseFloat(document.getElementById('kg').value);
     if (!(kg > 40 && kg < 250)) { toast('Enter your weight in kg'); return; }
     const file = document.getElementById('photo').files[0]; let photoId;
-    if (file) { try { photoId = `p-${k}-${Date.now()}`; await photos.set(photoId, await compressImage(file)); } catch { toast('Photo could not be saved'); photoId = undefined; } }
+    if (pending.weigh || file) {
+      try { photoId = `p-${k}-${Date.now()}`; await photos.set(photoId, pending.weigh || await compressImage(file)); pending.weigh = null; }
+      catch { toast('Photo could not be saved'); photoId = undefined; }
+    }
     const old = S.weights.find((w) => w.date === k);
     if (old && old.photoId && photoId) photos.del(old.photoId);
     S.weights = S.weights.filter((w) => w.date !== k);
     S.weights.push({ date: k, kg, photoId: photoId || (old && old.photoId) });
     toast('Weigh-in saved');
   }
+  else if (a === 'pick') { pickPhoto(el.dataset.slot); return; }
+  else if (a === 'unpick') { pending[el.dataset.slot] = null; render(); return; }
   else if (a === 'addPic') {
     const file = document.getElementById('pic').files[0]; const date = document.getElementById('picDate').value || k;
-    if (!file) { toast('Choose a photo first'); return; }
-    try { const id = `x-${date}-${Date.now()}`; await photos.set(id, await compressImage(file)); S.pics.push({ id, date }); toast('Photo saved'); }
+    if (!pending.pic && !file) { toast('Take or choose a photo first'); return; }
+    try { const id = `x-${date}-${Date.now()}`; await photos.set(id, pending.pic || await compressImage(file)); pending.pic = null; S.pics.push({ id, date }); toast('Photo saved'); }
     catch { toast('Photo could not be saved'); return; }
   }
   else if (a === 'delPic') {
@@ -1049,6 +1069,10 @@ app.addEventListener('change', async (e) => {
   if (a === 'homeWorkout') { S.homeWorkout[el.dataset.key || k] = el.checked; if (el.dataset.key) openDay = el.dataset.key; save(); render(); return; }
   if (a === 'homeToggle') { S.homeManual[k] = el.checked; save(); render(); return; }
   if (a === 'rehearsed') { S.rehearsed[el.dataset.key] = el.checked; save(); render(); return; }
+  if ((el.id === 'photo' || el.id === 'pic') && el.files[0]) {
+    try { pending[el.id === 'photo' ? 'weigh' : 'pic'] = await compressImage(el.files[0]); render(); } catch { toast('Image could not be read'); }
+    return;
+  }
   if (el.id === 'import' && el.files[0]) importBackup(el.files[0]);
 });
 

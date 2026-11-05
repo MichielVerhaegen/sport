@@ -48,7 +48,12 @@ jobs:
                '<category android:name="android.intent.category.BROWSABLE"/>'
                '<data android:scheme="' + scheme + '"/></intent-filter>')
           assert '</activity>' in s
-          open(p, 'w').write(s.replace('</activity>', f + '</activity>', 1))
+          s = s.replace('</activity>', f + '</activity>', 1)
+          # Camera plugin: gallery access on older Android versions (camera itself needs no permission here)
+          perms = ('<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>'
+                   '<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>')
+          s = s.replace('<application', perms + '<application', 1)
+          open(p, 'w').write(s)
           PY
 
       - name: Stable signing key (so updates install over the old version)
