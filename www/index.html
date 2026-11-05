@@ -81,6 +81,15 @@
 
   ul.ex, ul.plain, ul.micro, ul.log { list-style: none; padding: 0; margin: 6px 0 10px; }
   ul.ex li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  ul.ex li:has(details) { display: block; }
+  details.how summary { display: flex; justify-content: space-between; gap: 12px; color: var(--ink); font-weight: 400; padding: 0; list-style: none; }
+  details.how summary::-webkit-details-marker { display: none; }
+  details.how summary > span:first-child { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+  details.how[open] summary > span:first-child { color: var(--pool); }
+  details.how p { font-size: 15px; margin: 8px 0 0; }
+  details.how p.sub { margin-bottom: 4px; }
+  details.micro-how { margin: -4px 0 6px 34px; }
+  details.micro-how summary { color: var(--pool); font-size: 14px; text-decoration: underline dotted; }
   ul.ex .dose { color: var(--muted); text-align: right; font-size: 15px; flex: none; max-width: 45%; }
   ul.plain li { padding: 5px 0 5px 16px; position: relative; }
   ul.plain li::before { content: ""; position: absolute; left: 0; top: 14px; width: 7px; height: 7px; border-radius: 50%; background: var(--pool); }
@@ -90,8 +99,8 @@
 
   ol.week { list-style: none; padding: 0; margin: 0 0 8px; }
   ol.week li { border-top: 1px solid var(--line); }
-  ol.week summary { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: baseline; color: var(--ink); font-weight: 400; padding: 13px 0; list-style: none; }
-  ol.week summary::-webkit-details-marker { display: none; }
+  ol.week > li > details > summary { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: baseline; color: var(--ink); font-weight: 400; padding: 13px 0; list-style: none; }
+  ol.week > li > details > summary::-webkit-details-marker { display: none; }
   ol.week .day { font-family: var(--num); font-weight: 700; font-size: 19px; color: var(--muted); }
   ol.week .what { font-weight: 700; }
   ol.week .when { font-family: var(--num); font-weight: 600; font-size: 18px; color: var(--pool); }

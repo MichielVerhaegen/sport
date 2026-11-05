@@ -7,7 +7,7 @@ import { App as CapApp } from '@capacitor/app';
 import { GOOGLE_CLIENT_ID, REDIRECT_URI, REPO } from './config.js';
 
 const BUILD = Number(__BUILD__) || 0;
-import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES } from './content.js';
+import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES, HOWTO } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
 const STORE = 'lane-state-v1';
@@ -532,7 +532,17 @@ function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600);
 }
-const exList = (ex) => `<ul class="ex">${ex.map(([n, d]) => `<li><span>${esc(n)}</span><span class="dose">${esc(d)}</span></li>`).join('')}</ul>`;
+function howTo(name) {
+  const n = name.toLowerCase();
+  const hit = HOWTO.find(([keys]) => keys.some((k) => n.includes(k)));
+  return hit ? hit.slice(1) : null;
+}
+const exList = (ex) => `<ul class="ex">${ex.map(([n, d]) => {
+  const how = howTo(n);
+  if (!how) return `<li><span>${esc(n)}</span><span class="dose">${esc(d)}</span></li>`;
+  return `<li><details class="how"><summary><span>${esc(n)}</span><span class="dose">${esc(d)}</span></summary>
+    <p><b>Setup.</b> ${esc(how[0])}</p><p><b>Do it.</b> ${esc(how[1])}</p><p class="sub">${esc(how[2])}</p></details></li>`;
+}).join('')}</ul>`;
 
 function laneBlock(st) {
   return `<div class="lane" role="img" aria-label="${st.pct} percent of the way from ${st.start} to ${st.goal} kilos">
@@ -639,7 +649,8 @@ function viewToday() {
   if (home && slots.length) {
     h += `<p class="sub">Three short no-equipment moves, fitted between your meetings.</p><ul class="micro">${slots.map((m) => {
       const done = S.micro[k] && S.micro[k][m.i];
-      return `<li><label><input type="checkbox" data-action="micro" data-i="${m.i}" ${done ? 'checked' : ''}><span><b>${fmtTime(m.start)}</b> ${esc(m.ex[0])}, ${esc(m.ex[1])}</span></label></li>`;
+      const how = howTo(m.ex[0]);
+      return `<li><label><input type="checkbox" data-action="micro" data-i="${m.i}" ${done ? 'checked' : ''}><span><b>${fmtTime(m.start)}</b> ${esc(m.ex[0])}, ${esc(m.ex[1])}</span></label>${how ? `<details class="how micro-how"><summary>How?</summary><p><b>Setup.</b> ${esc(how[0])}</p><p><b>Do it.</b> ${esc(how[1])}</p><p class="sub">${esc(how[2])}</p></details>` : ''}</li>`;
     }).join('')}</ul>`;
   } else if (home) h += `<p class="sub">Your day is fully booked. Squeeze in the minimum instead.</p>`;
   else h += `<p class="sub">${calDay(k) ? 'Your calendar says office today.' : 'Not marked as a home day.'}</p>`;
