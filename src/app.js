@@ -230,19 +230,22 @@ function fmtQty(q, u) {
 }
 const fmtIng = ([n, q, u, note]) => (q == null ? `${n}, ${note}` : `${fmtQty(q, u)} ${n}${note ? ` (${note})` : ''}`);
 function shoppingList(monday) {
-  const from = ymd(today()); const items = {}; const pantry = new Set(); const mixes = new Set();
+  const from = ymd(today()); const items = {}; let meals = 0;
+  const add = (key, it) => { if (!items[key]) items[key] = { key, q: 0, meals: 0, ...it }; return items[key]; };
   for (let i = 0; i < 7; i++) {
     const date = addDays(monday, i); if (ymd(date) < from) continue;
     plannedMeals(date).forEach(({ meal }) => {
-      if (meal && meal.mix) { mixItems(meal).forEach((x) => mixes.add(x)); return; }
-      if (!meal || meal.own) return;
-      meal.ingredients.forEach(([n, q, u]) => {
-        if (q == null) { pantry.add(n); return; }
-        const key = `${n}|${u}`; items[key] = items[key] || { key, n, u, q: 0 }; items[key].q += q;
+      if (!meal || (meal.own && !meal.mix)) return;
+      meals++;
+      if (meal.mix) { mixItems(meal).forEach((n) => { add(`mix|${n}`, { n, kind: 'mix' }).meals++; }); return; }
+      meal.ingredients.forEach(([n, q, u, note]) => {
+        if (q == null) { add(`taste|${n}`, { n, kind: 'taste', note }).meals++; return; }
+        const it = add(`${n}|${u}`, { n, u, kind: 'qty' }); it.q += q; it.meals++;
       });
     });
   }
-  return { items: Object.values(items).sort((a, b) => a.n.localeCompare(b.n)), pantry: [...pantry].sort(), mixes: [...mixes].sort() };
+  const order = { qty: 0, taste: 1, mix: 2 };
+  return { items: Object.values(items).sort((a, b) => order[a.kind] - order[b.kind] || a.n.localeCompare(b.n)), meals };
 }
 
 /* ---------------- motivation ---------------- */
@@ -735,17 +738,10 @@ function viewFood() {
   }
   h += `</ol><div class="row"><button class="btn" data-action="autofill">Auto-fill empty meals</button>${totalPlanned ? '<button class="btn ghost" data-action="clearWeek">Clear week</button>' : ''}</div></section>`;
 
-  // shopping list
-  const shop = shoppingList(mon); const checked = S.shop[ymd(mon)] || {};
-  h += `<section><h2>Shopping list</h2>`;
-  if (!shop.items.length && !shop.mixes.length) h += `<p class="sub">Plan some meals and the list builds itself${planOffset === 0 ? ' (from today onward)' : ''}.</p>`;
-  else {
-    h += `<ul class="micro">${shop.items.map((it) => `<li><label><input type="checkbox" data-action="shop" data-week="${ymd(mon)}" data-key="${esc(it.key)}" ${checked[it.key] ? 'checked' : ''}><span class="${checked[it.key] ? 'got' : ''}">${esc(it.n)}, <b>${fmtQty(it.q, it.u)}</b></span></label></li>`).join('')}</ul>`;
-    if (shop.mixes.length) h += `<p class="sub">For your bowl mixes (amounts are up to you, within the rules): ${esc(shop.mixes.join(', ').toLowerCase())}.</p>`;
-    if (shop.pantry.length) h += `<p class="sub">Have at hand: ${esc(shop.pantry.join(', ').toLowerCase())}.</p>`;
-    h += `<button class="link" data-action="shopReset" data-week="${ymd(mon)}">Uncheck everything</button>`;
-  }
-  h += `</section>`;
+  // shopping list pointer
+  const shopCount = shoppingList(mon).items.length;
+  h += `<section><h2>Shopping list</h2><p class="sub">${shopCount ? `${shopCount} items for the planned meals${planOffset === 0 ? ' from today' : ''}.` : 'Plan some meals and the list builds itself.'}</p>
+    <button class="btn ghost" data-action="goShop">Open the shopping list</button></section>`;
 
   // bowl mixes
   h += `<section><h2>Bowl mixes</h2><p class="sub">Ingredients that work together, built only from the approved list: protein, a big volume base, one fat pick, and flavour. Pick them in the meal plan above.</p>`;
@@ -776,6 +772,27 @@ function viewFood() {
     <details><summary>Extra strategies</summary><ol class="steps">${DIET.strategies.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol></details>
     <details><summary>FAQ</summary>${DIET.faq.map(([q, a]) => `<p><b>${esc(q)}</b><br>${esc(a)}</p>`).join('')}</details>
     <p class="sub">Based on the 30-Day Filling Diet by Built With Science. For personal use.</p></section>`;
+  return h;
+}
+
+function viewShop() {
+  const d = today(); const mon = addDays(mondayOf(d), planOffset * 7); const wk = ymd(mon);
+  const shop = shoppingList(mon); const checked = S.shop[wk] || {};
+  const got = shop.items.filter((it) => checked[it.key]).length;
+  let h = `<header><h1>Shopping</h1><p class="sub">${shop.items.length ? `${got} of ${shop.items.length} items, for ${shop.meals} planned meal${shop.meals === 1 ? '' : 's'}${planOffset === 0 ? ' from today' : ''}.` : 'Everything you need for the planned meals.'}</p></header>`;
+  h += `<div class="seg" role="group" aria-label="Week">
+      <button data-action="planWeek" data-off="0" aria-pressed="${planOffset === 0}">This week</button>
+      <button data-action="planWeek" data-off="1" aria-pressed="${planOffset === 1}">Next week</button></div>`;
+  if (!shop.items.length) {
+    h += `<section><p class="sub">No meals planned for this week yet.</p><button class="btn" data-action="goFood">Plan meals</button></section>`;
+    return h;
+  }
+  const groups = [['qty', 'Ingredients', 'Amounts added up over the week.'], ['taste', 'To taste', 'Check you have these at home.'], ['mix', 'For your bowl mixes', 'Amounts are up to you, within the diet rules.']];
+  groups.forEach(([kind, title, sub]) => {
+    const list = shop.items.filter((it) => it.kind === kind); if (!list.length) return;
+    h += `<section><h2>${title}</h2><p class="sub">${sub}</p><ul class="micro shop">${list.map((it) => `<li><label><input type="checkbox" data-action="shop" data-week="${wk}" data-key="${esc(it.key)}" ${checked[it.key] ? 'checked' : ''}><span class="${checked[it.key] ? 'got' : ''}"><span class="it">${esc(it.n)}${it.kind === 'qty' ? ` <b>${fmtQty(it.q, it.u)}</b>` : it.note ? `, ${esc(it.note)}` : ''}</span><small>${it.meals} meal${it.meals === 1 ? '' : 's'}</small></span></label></li>`).join('')}</ul></section>`;
+  });
+  h += `<section><div class="row"><button class="btn ghost" data-action="shopReset" data-week="${wk}">Uncheck everything</button><button class="btn ghost" data-action="goFood">Change the plan</button></div></section>`;
   return h;
 }
 
@@ -868,7 +885,7 @@ function viewSettings() {
 }
 
 function render() {
-  const views = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, settings: viewSettings };
+  const views = { today: viewToday, train: viewTrain, food: viewFood, shop: viewShop, progress: viewProgress, settings: viewSettings };
   app.innerHTML = views[tab]();
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
   app.querySelectorAll('img[data-photo]').forEach(async (img) => { const src = await photos.get(img.dataset.photo); if (src) img.src = src; });
@@ -895,7 +912,8 @@ app.addEventListener('click', async (e) => {
   else if (a === 'session') { S.sessions[k] = { done: true, kind: el.dataset.kind }; toast('Counted'); }
   else if (a === 'sessionUndo') { delete S.sessions[k]; }
   else if (a === 'goDay') { openDay = el.dataset.day; tab = 'train'; render(); return; }
-  else if (a === 'goFood') { tab = 'food'; planOffset = 0; render(); window.scrollTo(0, 0); return; }
+  else if (a === 'goFood') { tab = 'food'; render(); window.scrollTo(0, 0); return; }
+  else if (a === 'goShop') { tab = 'shop'; render(); window.scrollTo(0, 0); return; }
   else if (a === 'startDiet') { S.diet.start = k; toast('Day 1. One bowl, filled to the top.'); }
   else if (a === 'planWeek') { planOffset = +el.dataset.off; render(); return; }
   else if (a === 'autofill') { autofillWeek(addDays(mondayOf(today()), planOffset * 7)); toast('Meals filled in'); }

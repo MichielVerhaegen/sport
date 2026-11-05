@@ -141,10 +141,14 @@
   dl.mix { display: grid; grid-template-columns: 96px 1fr; gap: 4px 10px; margin: 6px 0 8px; }
   dl.mix dt { color: var(--muted); font-size: 15px; }
   dl.mix dd { margin: 0; }
+  ul.shop li label span { display: flex; justify-content: space-between; gap: 8px; flex: 1; }
+  ul.shop .it { flex: 1; }
+  ul.shop .it b { white-space: nowrap; }
+  ul.shop small { color: var(--muted); font-size: 13px; flex: none; }
   .got { text-decoration: line-through; color: var(--muted); }
   .meal-empty { list-style: none; padding: 6px 0; }
   .tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 5; }
-  .tabs button { flex: 1; font: inherit; font-size: 15px; background: none; border: 0; color: var(--muted); padding: 10px 4px 14px; min-height: 60px; cursor: pointer; position: relative; }
+  .tabs button { flex: 1; font: inherit; font-size: 13px; background: none; border: 0; color: var(--muted); padding: 10px 0 14px; letter-spacing: -.01em; min-height: 60px; cursor: pointer; position: relative; }
   .tabs button[aria-current=page] { color: var(--pool); font-weight: 700; }
   .tabs button[aria-current=page]::before { content: ""; position: absolute; top: 0; left: 30%; right: 30%; height: 3px; border-radius: 0 0 3px 3px; background: var(--pool); }
   #toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 15px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: 90vw; z-index: 6; }
@@ -158,6 +162,7 @@
   <button data-tab="today" aria-current="page">Today</button>
   <button data-tab="train">Train</button>
   <button data-tab="food">Food</button>
+  <button data-tab="shop">Shop</button>
   <button data-tab="progress">Progress</button>
   <button data-tab="settings">Settings</button>
 </nav>

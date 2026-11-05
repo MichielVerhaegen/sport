@@ -32,7 +32,7 @@ The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday mus
 Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, each from one big bowl filled to the top with approved foods, no snacking, no calorie counting.
 - **Day counter**: start day 1 and watch the 30 days fill up.
 - **Meal plan**: breakfast, lunch and dinner for this week and next, chosen from five recipes, eleven bowl mixes, or your own bowl. **Auto-fill** does the week in one tap.
-- **Shopping list**: adds up the ingredients of the planned meals from today on, with check-offs.
+- **Shop tab**: every ingredient for the planned meals from today on, with amounts added up, plus the to-taste items and bowl-mix ingredients, all as check-offs.
 - **Recipes and bowl mixes**: step-by-step recipes with macros, and combinations of approved foods that work together.
 - **Diet guide**: the three rules, the full approved food list, extra strategies and FAQ.
 - Pick your bowl size (1.9 L or 1.4 L) in Settings. Check the diet with your doctor or dietitian before you start.
