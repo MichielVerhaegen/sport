@@ -55,7 +55,7 @@ The app is registered with Google so that users only have to tap **Sign in with 
 
 1. [console.cloud.google.com](https://console.cloud.google.com): a project with the **Google Calendar API** enabled.
 2. **Google Auth Platform**: app name *Lane*, audience **Internal** (Workspace only, no review) or External with test users; scope `.../auth/calendar.events`.
-3. **Clients → Create client → Android**, package `eu.michiel.lane`, SHA-1 of the keystore (`keytool -list -v -keystore keystore/lane.keystore -storepass android`).
+3. **Clients → Create client → Android**, package `eu.michiel.lane`, SHA-1 of the keystore (`keytool -list -v -keystore keystore/lane.keystore -storepass android`). Open the client, **Advanced Settings → Enable custom URI scheme** (off by default; without it sign-in fails with *Error 400: invalid_request*).
 4. Paste the client ID into `src/config.js` and push to `main`.
 
 If a Workspace admin restricts third-party apps, they allow this client ID once under **Security → API controls**. The old Apps Script bridge (`apps-script/Code.gs`) still works under *Settings → Advanced*.

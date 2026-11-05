@@ -32,15 +32,19 @@ jobs:
       - name: Create Android project
         run: npx cap add android
 
-      - name: Allow the Google sign-in redirect (eu.michiel.lane:/oauth2redirect)
+      - name: Allow the Google sign-in redirect (reversed client ID scheme)
         run: |
           python3 - <<'PY'
+          import re
+          cid = re.search(r"GOOGLE_CLIENT_ID = '([^']*)'", open('src/config.js').read()).group(1)
+          scheme = 'com.googleusercontent.apps.' + cid.split('.')[0]
+          print('redirect scheme:', scheme)
           p = 'android/app/src/main/AndroidManifest.xml'
           s = open(p).read()
           f = ('<intent-filter><action android:name="android.intent.action.VIEW"/>'
                '<category android:name="android.intent.category.DEFAULT"/>'
                '<category android:name="android.intent.category.BROWSABLE"/>'
-               '<data android:scheme="eu.michiel.lane"/></intent-filter>')
+               '<data android:scheme="' + scheme + '"/></intent-filter>')
           assert '</activity>' in s
           open(p, 'w').write(s.replace('</activity>', f + '</activity>', 1))
           PY

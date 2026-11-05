@@ -3,5 +3,7 @@
 // Paste the Android OAuth client ID (ends in .apps.googleusercontent.com) between the quotes.
 export const GOOGLE_CLIENT_ID = '983195732563-m2tnc3ak4pv85s9sj0rguug7i84m6fou.apps.googleusercontent.com';
 
-// Must match "appId" in capacitor.config.json and the Android OAuth client's package name.
-export const REDIRECT_URI = 'eu.michiel.lane:/oauth2redirect';
+// Google requires the redirect scheme to be the reversed client ID. Derived automatically;
+// the APK build registers the same scheme in AndroidManifest.xml.
+export const REDIRECT_SCHEME = `com.googleusercontent.apps.${GOOGLE_CLIENT_ID.split('.')[0]}`;
+export const REDIRECT_URI = `${REDIRECT_SCHEME}:/oauth2redirect`;
