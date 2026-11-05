@@ -81,7 +81,14 @@
 
   ul.ex, ul.plain, ul.micro, ul.log { list-style: none; padding: 0; margin: 6px 0 10px; }
   ul.ex li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
-  ul.ex li:has(details) { display: block; }
+  ul.ex li:has(details), ul.ex li:has(.exrow) { display: block; }
+  .exrow { display: flex; gap: 10px; align-items: flex-start; }
+  .exrow > details, .exrow > .exname { flex: 1; min-width: 0; }
+  .exname { display: flex; justify-content: space-between; gap: 12px; }
+  .sets { display: flex; flex-wrap: wrap; gap: 4px; flex: none; max-width: 84px; padding-top: 1px; }
+  .sets input { width: 22px; height: 22px; margin: 0; accent-color: var(--good); }
+  ul.ex li.ex-done summary > span:first-child, ul.ex li.ex-done .exname > span:first-child { color: var(--good); }
+  ul.ex li.ex-done .dose { text-decoration: line-through; }
   details.how summary { display: flex; justify-content: space-between; gap: 12px; color: var(--ink); font-weight: 400; padding: 0; list-style: none; }
   details.how summary::-webkit-details-marker { display: none; }
   details.how summary > span:first-child { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }

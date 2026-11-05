@@ -39,7 +39,7 @@ const DEFAULTS = () => ({
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
-  google: null, update: null, homeWorkout: {}, pics: [],
+  google: null, update: null, homeWorkout: {}, pics: [], exDone: {},
   diet: { start: '', bowl: 'large' },
   mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
@@ -559,11 +559,26 @@ function howTo(name) {
   const hit = HOWTO.find(([keys]) => keys.some((k) => n.includes(k)));
   return hit ? hit.slice(1) : null;
 }
-const exList = (ex) => `<ul class="ex">${ex.map(([n, d]) => {
+function setsOf(dose) {
+  const m = /^(\d+)(?:[–-](\d+))?\s*(?:rounds\s*)?[×x]/i.exec(dose);
+  return m ? clamp(Number(m[2] || m[1]), 1, 10) : 1;
+}
+const exState = (k, w) => (S.exDone[k] && S.exDone[k][w]) || {};
+function exProgress(k, w, exercises) {
+  const st = exState(k, w); let done = 0;
+  exercises.forEach(([, d], i) => { const n = setsOf(d); const arr = st[i] || []; if (arr.filter(Boolean).length >= n) done++; });
+  return { done, total: exercises.length };
+}
+// ctx = { k: date key, w: workout key } makes the list checkable.
+const exList = (ex, ctx) => `<ul class="ex">${ex.map(([n, d], i) => {
   const how = howTo(n);
-  if (!how) return `<li><span>${esc(n)}</span><span class="dose">${esc(d)}</span></li>`;
-  return `<li><details class="how"><summary><span>${esc(n)}</span><span class="dose">${esc(d)}</span></summary>
-    <p><b>Setup.</b> ${esc(how[0])}</p><p><b>Do it.</b> ${esc(how[1])}</p><p class="sub">${esc(how[2])}</p></details></li>`;
+  const body = how ? `<details class="how"><summary><span>${esc(n)}</span><span class="dose">${esc(d)}</span></summary>
+    <p><b>Setup.</b> ${esc(how[0])}</p><p><b>Do it.</b> ${esc(how[1])}</p><p class="sub">${esc(how[2])}</p></details>`
+    : `<div class="exname"><span>${esc(n)}</span><span class="dose">${esc(d)}</span></div>`;
+  if (!ctx) return `<li>${body}</li>`;
+  const n2 = setsOf(d); const arr = exState(ctx.k, ctx.w)[i] || []; const all = arr.filter(Boolean).length >= n2;
+  const boxes = Array.from({ length: n2 }, (_, si) => `<input type="checkbox" data-action="set" data-k="${ctx.k}" data-w="${ctx.w}" data-i="${i}" data-s="${si}" ${arr[si] ? 'checked' : ''} aria-label="${esc(n)}, set ${si + 1} of ${n2}">`).join('');
+  return `<li class="${all ? 'ex-done' : ''}"><div class="exrow"><span class="sets" title="${n2 === 1 ? 'Done' : `${n2} sets`}">${boxes}</span>${body}</div></li>`;
 }).join('')}</ul>`;
 
 function laneBlock(st) {
@@ -634,6 +649,8 @@ function viewToday() {
     h += `<p><b>${esc(w.title)}</b>, ${w.mins} min${slot ? ` at ${fmtTime(slot.start)}` : ''}. <span class="sub">${esc(w.style)}</span></p>`;
     if (w.home || w.hasHome) h += `<label class="toggle"><input type="checkbox" data-action="homeWorkout" ${w.home ? 'checked' : ''}> Training at home today (no equipment)</label>`;
     if (S.settings.bundle) h += `<p class="sub">Only while training: ${esc(S.settings.bundle)}</p>`;
+    const pr = exProgress(k, w.key, w.exercises);
+    if (!done && pr.done) h += `<p class="sub">${pr.done} of ${pr.total} exercises ticked off.</p>`;
     h += done ? `<p class="ok">Done (${S.sessions[k].kind === 'minimum' ? 'minimum' : 'full session'}).</p><button class="link" data-action="sessionUndo">Undo</button>`
       : `<div class="row"><button class="btn" data-action="session" data-kind="full">Did the session</button><button class="btn ghost" data-action="session" data-kind="minimum">Did the minimum</button></div>
          <button class="link" data-action="goDay" data-day="${k}">Show the exercises</button>`;
@@ -684,7 +701,7 @@ function viewToday() {
   if (st2.stackAfter && st2.stackDo) h += `<p>After <b>${esc(st2.stackAfter)}</b>, I do <b>${esc(st2.stackDo)}</b>.</p>`;
   if (!st2.bundle || !st2.stackAfter) h += `<p class="sub">Set your habit stack and training reward in Settings.</p>`;
   if (S.ifthen.length) h += `<p class="sub">Your if-then plans:</p><ul class="plain">${S.ifthen.slice(-3).reverse().map((p) => `<li>If ${esc(p.if)}, then ${esc(p.then)}.</li>`).join('')}</ul>`;
-  h += `<details><summary>Minimum version (15 min)</summary>${exList(MINIMUM.exercises)}<p class="sub">${MINIMUM.note}</p></details></section>`;
+  h += `<details><summary>Minimum version (15 min)</summary>${exList(MINIMUM.exercises, { k, w: 'minimum' })}<p class="sub">${MINIMUM.note}</p></details></section>`;
   return h;
 }
 
@@ -698,7 +715,7 @@ function viewTrain() {
     const title = w ? w.title : plan.title;
     h += `<li class="${isToday ? 'is-today' : ''} ${done ? 'is-done' : ''}"><details ${openDay === k ? 'open' : ''}>
       <summary><span class="day">${DAYS[date.getDay()].slice(0, 3)} ${date.getDate()}</span><span class="what">${esc(title)}</span><span class="when">${done ? 'Done' : slot ? fmtTime(slot.start) : ''}</span></summary>
-      ${w ? `<p class="sub">${esc(w.style)}, about ${w.mins} min</p>${w.home || w.hasHome ? `<label class="toggle"><input type="checkbox" data-action="homeWorkout" data-key="${k}" ${w.home ? 'checked' : ''}> At home, no equipment</label>` : ''}${exList(w.exercises)}${w.note ? `<p class="sub">${esc(w.note)}</p>` : ''}` : `<p>${esc(plan.text)}</p>`}
+      ${w ? `<p class="sub">${esc(w.style)}, about ${w.mins} min</p>${w.home || w.hasHome ? `<label class="toggle"><input type="checkbox" data-action="homeWorkout" data-key="${k}" ${w.home ? 'checked' : ''}> At home, no equipment</label>` : ''}<p class="sub">Tick each set as you go. ${(() => { const pr = exProgress(k, w.key, w.exercises); return pr.done ? `${pr.done} of ${pr.total} exercises done.` : ''; })()}</p>${exList(w.exercises, { k, w: w.key })}${w.note ? `<p class="sub">${esc(w.note)}</p>` : ''}` : `<p>${esc(plan.text)}</p>`}
       ${isHome(k) ? `<p class="sub">Home day: ${microSlots(date).length} move breaks planned.</p>` : ''}
     </details></li>`;
   }
@@ -1018,7 +1035,18 @@ app.addEventListener('change', async (e) => {
   if (a === 'tip') { S.dietTips[k] = S.dietTips[k] || {}; S.dietTips[k][el.dataset.tip] = el.checked; save(); return; }
   if (a === 'shop') { S.shop[el.dataset.week] = S.shop[el.dataset.week] || {}; S.shop[el.dataset.week][el.dataset.key] = el.checked; save(); render(); return; }
   if (a === 'micro') { S.micro[k] = S.micro[k] || [false, false, false]; S.micro[k][+el.dataset.i] = el.checked; save(); return; }
-  if (a === 'homeWorkout') { S.homeWorkout[el.dataset.key || k] = el.checked; save(); render(); return; }
+  if (a === 'set') {
+    const { k: dk, w, i, s: si } = el.dataset;
+    S.exDone[dk] = S.exDone[dk] || {}; const ws = (S.exDone[dk][w] = S.exDone[dk][w] || {}); const arr = (ws[i] = ws[i] || []);
+    arr[+si] = el.checked; if (tab === 'train') openDay = dk;
+    const list = w === 'minimum' ? MINIMUM.exercises : (workoutFor(parseYmd(dk)) || {}).exercises;
+    if (list && dk === k && el.checked && !(S.sessions[k] && S.sessions[k].done)) {
+      const pr = exProgress(dk, w, list);
+      if (pr.done === pr.total) { S.sessions[k] = { done: true, kind: w === 'minimum' ? 'minimum' : 'full' }; toast(w === 'minimum' ? 'Minimum done. Counted.' : 'Whole session done. Counted.'); }
+    }
+    save(); render(); return;
+  }
+  if (a === 'homeWorkout') { S.homeWorkout[el.dataset.key || k] = el.checked; if (el.dataset.key) openDay = el.dataset.key; save(); render(); return; }
   if (a === 'homeToggle') { S.homeManual[k] = el.checked; save(); render(); return; }
   if (a === 'rehearsed') { S.rehearsed[el.dataset.key] = el.checked; save(); render(); return; }
   if (el.id === 'import' && el.files[0]) importBackup(el.files[0]);

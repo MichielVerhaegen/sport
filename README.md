@@ -26,7 +26,7 @@ Lane only sees your own calendar and only adds events you ask for. **Sign out** 
 - **Fresh start**: a Monday message after a slipped week.
 
 ### Train
-The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday musical, Wednesday calisthenics, Thursday upper body, Friday knee-friendly legs and grip, Saturday swim, Sunday rest and weigh-in. Open a day to see the exercises; tap an exercise for how to do it (setup, cues, easier and harder versions). Each gym or pool session has a **home version** without equipment (push-ups, towel rows, a loaded backpack, a walk or cycle instead of the swim): tick *At home* on that day. **Add next 7 days to calendar** puts the sessions in Google Calendar at the planned times; they're tagged so they're never added twice.
+The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday musical, Wednesday calisthenics, Thursday upper body, Friday knee-friendly legs and grip, Saturday swim, Sunday rest and weigh-in. Open a day to see the exercises; tap an exercise for how to do it (setup, cues, easier and harder versions). Tick a box per set as you go; when every set is ticked the session counts as done by itself. Each gym or pool session has a **home version** without equipment (push-ups, towel rows, a loaded backpack, a walk or cycle instead of the swim): tick *At home* on that day. **Add next 7 days to calendar** puts the sessions in Google Calendar at the planned times; they're tagged so they're never added twice.
 
 ### Food: the 30-day filling diet
 Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, each from one big bowl filled to the top with approved foods, no snacking, no calorie counting.
