@@ -1,56 +1,67 @@
 # Lane
 
-Your personal training and habit app: weekly commitment, one-tap check-ins, Sunday weigh-ins with photos, progress towards 115 kg, a training week built around your musical, and move breaks on home days.
+Lane is a personal training and food app for Android. It runs entirely on your phone: a weekly commitment, one-tap check-ins, a training week that fits around your calendar, the 30-day filling diet with a meal planner and shopping list, and Sunday weigh-ins with photos and a progress graph.
 
-## 1. Build the APK on GitHub (about 10 minutes)
+## 1. Install the app (5 minutes)
 
-1. Create a **private** repository in your GitHub organization, for example `lane`.
-2. Upload everything in this folder (including the hidden `.github` folder) to the `main` branch. On github.com: **Add file → Upload files**, then drag the folder contents in.
-3. Open the **Actions** tab. The *Build APK* workflow starts by itself (or click **Run workflow**). A build takes 5–8 minutes of your Actions minutes.
-4. When it's green, open the run and download **lane-apk** under *Artifacts*. Unzip it to get `app-debug.apk`.
-
-The first build saves a signing key in `keystore/`, so later builds install over the old app without losing data. If your organization blocks workflows from pushing, the run shows a warning: then go to **Settings → Actions → General → Workflow permissions** and choose *Read and write*, or export a backup before each update.
-
-## 2. Install on your phone
-
-1. Send `app-debug.apk` to your phone (Drive, email, cable).
-2. Open it and allow *Install unknown apps* for the app you opened it with.
+1. Get `app-debug.apk`. Either someone sends it to you, or you download it yourself: on GitHub open **Actions**, click the latest green **Build APK** run, download **lane-apk** under *Artifacts* and unzip it.
+2. Copy the APK to your phone (Drive, email, cable) and open it. Allow *Install unknown apps* for the app you opened it with. Updates install over the old version and keep your data.
 3. Open Lane and tap **Turn on reminders**.
 4. Recommended: in Android settings, set Lane's battery usage to *Unrestricted*, otherwise some phones delay reminders.
+5. **Settings → Google Calendar → Sign in with Google**. Pick your account and allow calendar access. That's all: Lane now plans sessions around your meetings and detects your home days.
 
-## 3. Connect Google Calendar (sign in with Google)
+Lane only sees your own calendar and only adds events you ask for. **Sign out** in Settings revokes access.
 
-**For everyone using the app:** open **Settings → Google Calendar → Sign in with Google**, pick your account, allow access. Done. No scripts, links or keys.
+## 2. What the app does
 
-**One-time setup by the app owner** (about 10 minutes, so nobody else has to):
-
-1. In [Google Cloud Console](https://console.cloud.google.com) create a project (for example *Lane*) and enable the **Google Calendar API**.
-2. **Google Auth Platform → Branding / Audience**: app name *Lane*. Choose **Internal** if you use Google Workspace (only your organization can sign in, no Google review needed). Otherwise choose External and add the people who will use it as test users.
-3. **Data access**: add the scope `.../auth/calendar.events`.
-4. **Clients → Create client → Android**:
-   - Package name: `eu.michiel.lane`
-   - SHA-1 fingerprint: `1C:ED:73:7D:83:59:75:F7:14:9C:62:CA:45:39:15:53:69:D1:CE:27` (the key in `keystore/lane.keystore`; if you ever replace that file, run `keytool -list -v -keystore keystore/lane.keystore -storepass android` for the new one).
-5. Copy the client ID (ends in `.apps.googleusercontent.com`) into `src/config.js` and push to `main`. The new APK has the sign-in button working.
-
-Workspace admins who restrict third-party apps must allow this client ID once (Admin console → Security → API controls).
-
-What it does: it reads your meetings and your Office/Home working location, places sessions in free time, finds three gaps for move breaks on home days, and adds sessions to your calendar when you tap **Add next 7 days to calendar**. Events it creates are tagged so they're never added twice. Sign-in tokens stay on your phone and are left out of backups. **Sign out** revokes access.
-
-The old Apps Script bridge (`apps-script/Code.gs`) still works under *Settings → Advanced* for anyone who already set it up.
-
-## How the app works
-
-- **Pick your week** (Sunday): training week = 2 sessions; food week = protein at every meal, no stress snacks. A week counts when you hit it.
-- **Daily check-in**: one tap. Miss two days and reminders get more persistent; on a "Not today" you get an if-then plan instead of guilt.
+### Today
+- **Pick your week** (on Sunday): a *training week* (two sessions) or a *food week* (protein at every meal, no stress snacks). A week counts when you hit the target.
+- **Daily check-in**: one tap, *Done* or *Not today*. On a miss you get a kind word and an if-then plan for tomorrow instead of guilt. Miss two days and the reminders get more persistent.
+- **Today's training**: the session for today, with a start time that fits between your meetings, and a 15-minute minimum version for busy days.
+- **Today's meals**: your planned bowls to tick off, plus the three extra strategies from the diet.
+- **Home day moves**: on days you work from home, three two-minute moves fitted into gaps in your calendar.
 - **Fresh start**: a Monday message after a slipped week.
-- **Training**: Mon short upper body only if you rehearsed Sunday, Tue musical, Wed calisthenics (Kevin Zhang style), Thu upper body (Trainer Winny style), Fri knee-friendly legs and grip, Sat swim, Sun rest and weigh-in.
-- **Progress**: weekly weight, % towards your goal, BMI, streak, graph and first-vs-latest photos. A warning shows if you lose more than about 1 kg a week.
-- **Food**: the 30-Day Filling Diet (Built With Science): day counter, weekly meal planner (3 meals a day from 5 recipes or your own bowl), auto-fill, shopping list that adds up the week's ingredients, daily meal check-offs on the Today tab, approved foods, rules and FAQ. A Sunday reminder nudges you to plan next week. Recipes and diet text: `src/content.js`.
-- **Data**: stays on your phone only. Use **Settings → Export backup** now and then.
 
-## Change things
+### Train
+The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday musical, Wednesday calisthenics, Thursday upper body, Friday knee-friendly legs and grip, Saturday swim, Sunday rest and weigh-in. Open a day to see the exercises. **Add next 7 days to calendar** puts the sessions in Google Calendar at the planned times; they're tagged so they're never added twice.
 
-- Exercises and the weekly plan: `src/content.js`
-- Logic and screens: `src/app.js`, styling: `www/index.html`
+### Food: the 30-day filling diet
+Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, each from one big bowl filled to the top with approved foods, no snacking, no calorie counting.
+- **Day counter**: start day 1 and watch the 30 days fill up.
+- **Meal plan**: breakfast, lunch and dinner for this week and next, chosen from five recipes, eleven bowl mixes, or your own bowl. **Auto-fill** does the week in one tap.
+- **Shopping list**: adds up the ingredients of the planned meals from today on, with check-offs.
+- **Recipes and bowl mixes**: step-by-step recipes with macros, and combinations of approved foods that work together.
+- **Diet guide**: the three rules, the full approved food list, extra strategies and FAQ.
+- Pick your bowl size (1.9 L or 1.4 L) in Settings. Check the diet with your doctor or dietitian before you start.
 
-Push to `main` and a new APK is built.
+### Progress
+Weekly weigh-in with an optional photo, percentage towards your goal, kg lost and to go, BMI, streak, a graph, and your first photo next to your latest. A warning shows if you lose more than about 1 kg a week.
+
+### Settings
+Your start, goal and height; reminder times; habit tricks (a reward you only allow while training, a habit stack); Google Calendar; diet bowl size and start date; backup.
+
+### Your data
+Everything stays on your phone. Nothing is sent anywhere except your own Google Calendar when you sign in. Use **Settings → Export backup** now and then; sign-in tokens are left out of backups.
+
+## 3. For the app owner
+
+### Build the APK
+Every push to `main` runs the **Build APK** workflow on GitHub Actions (5–8 minutes). You can also start it by hand: **Actions → Build APK → Run workflow**. Download **lane-apk** from the run.
+
+The signing key lives in `keystore/lane.keystore`, so every build installs over the previous one. The first build created it; if your organization blocks workflows from pushing, allow it under **Settings → Actions → General → Workflow permissions → Read and write**.
+
+### Google sign-in (one-time, already done)
+The app is registered with Google so that users only have to tap **Sign in with Google**. If you ever need to redo it, for example for a new signing key:
+
+1. [console.cloud.google.com](https://console.cloud.google.com): a project with the **Google Calendar API** enabled.
+2. **Google Auth Platform**: app name *Lane*, audience **Internal** (Workspace only, no review) or External with test users; scope `.../auth/calendar.events`.
+3. **Clients → Create client → Android**, package `eu.michiel.lane`, SHA-1 of the keystore (`keytool -list -v -keystore keystore/lane.keystore -storepass android`).
+4. Paste the client ID into `src/config.js` and push to `main`.
+
+If a Workspace admin restricts third-party apps, they allow this client ID once under **Security → API controls**. The old Apps Script bridge (`apps-script/Code.gs`) still works under *Settings → Advanced*.
+
+### Change things
+- Exercises and the weekly plan: `src/content.js` (top half)
+- Diet, recipes and bowl mixes: `src/content.js` (bottom half)
+- Logic and screens: `src/app.js`; styling: `www/index.html`
+- Local bundle: `npm ci && npm run build`, then open `www/index.html` in a browser (reminders and sign-in only work in the installed app)
