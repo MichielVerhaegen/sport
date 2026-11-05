@@ -7,3 +7,6 @@ export const GOOGLE_CLIENT_ID = '983195732563-m2tnc3ak4pv85s9sj0rguug7i84m6fou.a
 // the APK build registers the same scheme in AndroidManifest.xml.
 export const REDIRECT_SCHEME = `com.googleusercontent.apps.${GOOGLE_CLIENT_ID.split('.')[0]}`;
 export const REDIRECT_URI = `${REDIRECT_SCHEME}:/oauth2redirect`;
+
+// GitHub repository that publishes the APK as releases (used for the update check).
+export const REPO = 'MichielVerhaegen/sport';

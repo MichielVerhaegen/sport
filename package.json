@@ -4,7 +4,7 @@
   "private": true,
   "description": "Lane: personal training and habit app for Michiel",
   "scripts": {
-    "build": "esbuild src/app.js --bundle --format=iife --target=es2019 --outfile=www/app.js"
+    "build": "esbuild src/app.js --bundle --format=iife --target=es2019 --outfile=www/app.js --define:__BUILD__=\\\"${LANE_BUILD:-0}\\\""
   },
   "dependencies": {
     "@capacitor/android": "6.2.3",

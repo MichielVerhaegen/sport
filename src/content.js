@@ -14,6 +14,15 @@ export const WORKOUTS = {
       ['Biceps curls', '2 × 10–12'],
       ['Dead hang', '2 × 20–40 s'],
     ],
+    home: {
+      style: 'Quick home session, no equipment',
+      exercises: [
+        ['Push-ups', '3 × as many as you can, stop 1–2 reps before failure'],
+        ['Towel or doorframe rows', '3 × 10–12'],
+        ['Backpack curls (books or bottles inside)', '2 × 10–12'],
+        ['Towel hang (wrap a towel over a door, pull and hold)', '2 × 20–40 s'],
+      ],
+    },
   },
   calisthenics: {
     title: 'Calisthenics',
@@ -42,6 +51,18 @@ export const WORKOUTS = {
       ['Dips (assisted if needed)', '3 × 6–10'],
     ],
     note: 'Progressive overload: one more rep or a small weight jump each week. Chest, arms and back are your focus areas.',
+    home: {
+      style: 'Home version: bodyweight plus a loaded backpack',
+      exercises: [
+        ['Push-ups (feet raised on a chair for more load)', '4 × 8–12'],
+        ['Doorframe rows or towel rows', '4 × 8–12'],
+        ['Pike push-ups', '3 × 6–10'],
+        ['Backpack rows (bent over, backpack in both hands)', '3 × 10–12'],
+        ['Backpack curls', '3 × 10–12'],
+        ['Chair dips', '3 × 8–12'],
+      ],
+      note: 'Make it harder each week: more reps, slower lowering, or more books in the backpack.',
+    },
   },
   legs: {
     title: 'Legs and grip',
@@ -56,6 +77,18 @@ export const WORKOUTS = {
       ['Dead hang', '2 × as long as you can'],
     ],
     note: 'Agree the leg ranges with your physio. Knee pain above 3 out of 10? Stop that exercise for today.',
+    home: {
+      style: 'Home version: knee-friendly, no equipment',
+      exercises: [
+        ['Box squats to a chair, limited range (sit back, stand up)', '3 × 10–12'],
+        ['Glute bridge, single leg when easy', '3 × 10–12'],
+        ['Hamstring walk-outs (lying, heels on a towel on a smooth floor)', '3 × 8–10'],
+        ['Standing calf raises on a step', '3 × 12–15'],
+        ["Backpack farmer's carry", '3 × 30–40 m'],
+        ['Towel hang or towel wring-outs', '2 × as long as you can'],
+      ],
+      note: 'Same rule as in the gym: knee pain above 3 out of 10? Stop that exercise for today.',
+    },
   },
   swim: {
     title: 'Swim',
@@ -68,6 +101,17 @@ export const WORKOUTS = {
       ['Easy cool-down', '200 m'],
     ],
     note: 'No pool today? Cycle 45 minutes instead.',
+    home: {
+      title: 'Home cardio',
+      mins: 45,
+      style: 'Low-impact cardio without the pool',
+      exercises: [
+        ['Brisk walk or cycle', '35–45 minutes, able to talk but not sing'],
+        ['Or: stairs at an easy pace', '10 × up and down, rest as needed'],
+        ['Finish: dead hang or towel hang', '2 × 20–40 s'],
+      ],
+      note: 'Keep it easy on the knee: no running, no jumping.',
+    },
   },
 };
 

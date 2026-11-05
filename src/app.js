@@ -4,7 +4,9 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Browser } from '@capacitor/browser';
 import { App as CapApp } from '@capacitor/app';
-import { GOOGLE_CLIENT_ID, REDIRECT_URI } from './config.js';
+import { GOOGLE_CLIENT_ID, REDIRECT_URI, REPO } from './config.js';
+
+const BUILD = Number(__BUILD__) || 0;
 import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
@@ -33,11 +35,11 @@ const DEFAULTS = () => ({
   settings: {
     checkinTime: '20:30', weighTime: '09:00', sessionTime: '18:30',
     notifications: true, bridgeUrl: '', bridgeKey: '', addMicro: false,
-    bundle: '', stackAfter: '', stackDo: '',
+    bundle: '', stackAfter: '', stackDo: '', homeDefault: false,
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
-  google: null,
+  google: null, update: null, homeWorkout: {},
   diet: { start: '', bowl: 'large' },
   mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
@@ -136,11 +138,14 @@ function weekStatus(monday) {
 const modeOf = (date) => { const w = S.weeks[ymd(mondayOf(date))]; return w ? w.mode : null; };
 
 /* ---------------- plan & slots ---------------- */
+function trainsAtHome(k) { return S.homeWorkout[k] !== undefined ? S.homeWorkout[k] : !!S.settings.homeDefault; }
 function workoutFor(date) {
   const plan = WEEK[date.getDay()];
-  if (plan.kind === 'session') return { key: plan.workout, ...WORKOUTS[plan.workout] };
-  if (plan.kind === 'flex' && S.rehearsed[ymd(addDays(date, -1))]) return { key: 'monShort', ...WORKOUTS.monShort };
-  return null;
+  const key = plan.kind === 'session' ? plan.workout : plan.kind === 'flex' && S.rehearsed[ymd(addDays(date, -1))] ? 'monShort' : null;
+  if (!key) return null;
+  const base = WORKOUTS[key]; const k = ymd(date);
+  if (base.home && trainsAtHome(k)) return { key, ...base, ...base.home, home: true };
+  return { key, ...base, home: false, hasHome: !!base.home };
 }
 function calDay(k) { return S.calendar && S.calendar.days ? S.calendar.days.find((x) => x.date === k) : null; }
 function busyFor(k) {
@@ -500,6 +505,26 @@ async function importBackup(file) {
   } catch { toast('That file is not a Lane backup.'); }
 }
 
+/* ---------------- updates (GitHub releases) ---------------- */
+async function checkForUpdate(manual) {
+  if (!manual && S.update && Date.now() - S.update.checkedAt < 6 * 3600e3) return;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!res.ok) throw new Error(res.status === 404 ? 'No builds published yet.' : `GitHub answered ${res.status}.`);
+    const r = await res.json();
+    const build = Number(String(r.tag_name || '').replace(/^build-/, '')) || 0;
+    const asset = (r.assets || []).find((a) => a.name.endsWith('.apk'));
+    S.update = { checkedAt: Date.now(), build, url: (asset && asset.browser_download_url) || r.html_url, notes: (r.body || '').slice(0, 200) };
+    save(); render();
+    if (manual) toast(build > BUILD ? `Build ${build} is available` : 'You have the latest build');
+  } catch (e) { if (manual) toast(e.message); }
+}
+const updateAvailable = () => isNative && S.update && S.update.build > BUILD;
+async function openUpdate() {
+  const url = S.update && S.update.url; if (!url) return;
+  if (isNative) await Browser.open({ url }); else window.open(url, '_blank');
+}
+
 /* ---------------- UI helpers ---------------- */
 let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0;
 const app = document.getElementById('app');
@@ -537,6 +562,9 @@ function viewToday() {
   if (isNative && permission !== 'granted' && S.settings.notifications) {
     h += `<div class="banner"><span>Reminders keep you on track when motivation dips.</span><button class="btn small" data-action="perm">Turn on reminders</button></div>`;
   }
+  if (updateAvailable()) {
+    h += `<div class="banner"><span>Lane build ${S.update.build} is ready${S.update.notes ? `: ${esc(S.update.notes.split('\n')[0])}` : ''}.</span><button class="btn small" data-action="update">Download</button></div>`;
+  }
   h += laneBlock(st);
 
   if (!S.weeks[thisWeek]) h += pickWeekBlock(thisWeek, 'Pick this week');
@@ -572,6 +600,7 @@ function viewToday() {
   if (w) {
     const slot = sessionSlot(d); const done = S.sessions[k] && S.sessions[k].done;
     h += `<p><b>${esc(w.title)}</b>, ${w.mins} min${slot ? ` at ${fmtTime(slot.start)}` : ''}. <span class="sub">${esc(w.style)}</span></p>`;
+    if (w.home || w.hasHome) h += `<label class="toggle"><input type="checkbox" data-action="homeWorkout" ${w.home ? 'checked' : ''}> Training at home today (no equipment)</label>`;
     if (S.settings.bundle) h += `<p class="sub">Only while training: ${esc(S.settings.bundle)}</p>`;
     h += done ? `<p class="ok">Done (${S.sessions[k].kind === 'minimum' ? 'minimum' : 'full session'}).</p><button class="link" data-action="sessionUndo">Undo</button>`
       : `<div class="row"><button class="btn" data-action="session" data-kind="full">Did the session</button><button class="btn ghost" data-action="session" data-kind="minimum">Did the minimum</button></div>
@@ -636,7 +665,7 @@ function viewTrain() {
     const title = w ? w.title : plan.title;
     h += `<li class="${isToday ? 'is-today' : ''} ${done ? 'is-done' : ''}"><details ${openDay === k ? 'open' : ''}>
       <summary><span class="day">${DAYS[date.getDay()].slice(0, 3)} ${date.getDate()}</span><span class="what">${esc(title)}</span><span class="when">${done ? 'Done' : slot ? fmtTime(slot.start) : ''}</span></summary>
-      ${w ? `<p class="sub">${esc(w.style)}, about ${w.mins} min</p>${exList(w.exercises)}${w.note ? `<p class="sub">${esc(w.note)}</p>` : ''}` : `<p>${esc(plan.text)}</p>`}
+      ${w ? `<p class="sub">${esc(w.style)}, about ${w.mins} min</p>${w.home || w.hasHome ? `<label class="toggle"><input type="checkbox" data-action="homeWorkout" data-key="${k}" ${w.home ? 'checked' : ''}> At home, no equipment</label>` : ''}${exList(w.exercises)}${w.note ? `<p class="sub">${esc(w.note)}</p>` : ''}` : `<p>${esc(plan.text)}</p>`}
       ${isHome(k) ? `<p class="sub">Home day: ${microSlots(date).length} move breaks planned.</p>` : ''}
     </details></li>`;
   }
@@ -801,6 +830,8 @@ function viewSettings() {
     ${field('settings.weighTime', 'Sunday weigh-in', 'time')}
     ${field('settings.sessionTime', 'Preferred training time on weekdays', 'time')}
     <button class="btn ghost" data-action="testNotif">Send a test reminder</button></div></section>
+  <section><h2>Training</h2><div class="form">
+    <label class="toggle"><input type="checkbox" data-bind="settings.homeDefault" ${s.homeDefault ? 'checked' : ''}> I usually train at home (no equipment). You can switch per day on the Today tab.</label></div></section>
   <section><h2>Habit tricks</h2><div class="form">
     ${field('settings.bundle', 'Reward you only allow while training (temptation bundle)', 'text', 'placeholder="my favourite podcast"')}
     ${field('settings.stackAfter', 'Habit stack: after…', 'text', 'placeholder="my morning coffee"')}
@@ -820,7 +851,9 @@ function viewSettings() {
     ${field('diet.start', 'Day 1 of the 30 days (empty = not started)', 'date')}</div></section>
   <section><h2>Backup</h2><p class="sub">Your data lives only on this phone. Export a backup now and then.</p>
     <div class="row"><button class="btn ghost" data-action="export">Export backup</button><label class="btn ghost file-btn">Restore backup<input id="import" type="file" accept="application/json,.json"></label></div>
-    <button class="link danger" data-action="reset">Erase all data</button></section>`;
+    <button class="link danger" data-action="reset">Erase all data</button></section>
+  <section><h2>App updates</h2><p class="sub">You have build ${BUILD || 'dev'}.${S.update ? ` Latest published: build ${S.update.build}, checked ${new Date(S.update.checkedAt).toLocaleString()}.` : ''} Lane checks a few times a day and tells you on the Today tab.</p>
+    <div class="row">${updateAvailable() ? `<button class="btn" data-action="update">Download build ${S.update.build}</button>` : ''}<button class="btn ghost" data-action="checkUpdate">Check for updates</button></div></section>`;
 }
 
 function render() {
@@ -877,6 +910,8 @@ app.addEventListener('click', async (e) => {
     const w = S.weights.find((x) => x.date === el.dataset.date); if (w && w.photoId) photos.del(w.photoId);
     S.weights = S.weights.filter((x) => x.date !== el.dataset.date);
   }
+  else if (a === 'update') { openUpdate(); return; }
+  else if (a === 'checkUpdate') { toast('Checking…'); checkForUpdate(true); return; }
   else if (a === 'googleIn') { googleSignIn().catch((e) => toast(e.message)); return; }
   else if (a === 'googleOut') { if (!confirm('Sign out of Google?')) return; googleSignOut(); return; }
   else if (a === 'refreshCal') { refreshCalendar(false); return; }
@@ -911,6 +946,7 @@ app.addEventListener('change', async (e) => {
   if (a === 'tip') { S.dietTips[k] = S.dietTips[k] || {}; S.dietTips[k][el.dataset.tip] = el.checked; save(); return; }
   if (a === 'shop') { S.shop[el.dataset.week] = S.shop[el.dataset.week] || {}; S.shop[el.dataset.week][el.dataset.key] = el.checked; save(); render(); return; }
   if (a === 'micro') { S.micro[k] = S.micro[k] || [false, false, false]; S.micro[k][+el.dataset.i] = el.checked; save(); return; }
+  if (a === 'homeWorkout') { S.homeWorkout[el.dataset.key || k] = el.checked; save(); render(); return; }
   if (a === 'homeToggle') { S.homeManual[k] = el.checked; save(); render(); return; }
   if (a === 'rehearsed') { S.rehearsed[el.dataset.key] = el.checked; save(); render(); return; }
   if (el.id === 'import' && el.files[0]) importBackup(el.files[0]);
@@ -923,7 +959,7 @@ async function start() {
   }
   await checkPermission();
   if (!localStorage.getItem(STORE)) save();
-  render(); reschedule();
+  render(); reschedule(); checkForUpdate(false);
   if (isNative) {
     CapApp.addListener('appUrlOpen', (e) => handleRedirect(e.url));
     try { const l = await CapApp.getLaunchUrl(); if (l) handleRedirect(l.url); } catch {}
@@ -932,7 +968,7 @@ async function start() {
 }
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
-  await checkPermission(); render(); reschedule();
+  await checkPermission(); render(); reschedule(); checkForUpdate(false);
   if (calendarReady() && S.calendar && Date.now() - S.calendar.fetchedAt > 2 * 3600e3) refreshCalendar(true);
 });
 start();

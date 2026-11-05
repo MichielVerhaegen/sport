@@ -25,6 +25,8 @@ jobs:
           java-version: 17
 
       - name: Install and bundle
+        env:
+          LANE_BUILD: ${{ github.run_number }}
         run: |
           npm ci
           npm run build
@@ -75,3 +77,13 @@ jobs:
           name: lane-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Publish release (so the app can find updates)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk lane.apk
+          gh release create "build-${{ github.run_number }}" lane.apk \
+            --title "Lane build ${{ github.run_number }}" \
+            --notes "$(git log -1 --pretty=%s)" --latest

@@ -4,11 +4,14 @@ Lane is a personal training and food app for Android. It runs entirely on your p
 
 ## 1. Install the app (5 minutes)
 
-1. Get `app-debug.apk`. Either someone sends it to you, or you download it yourself: on GitHub open **Actions**, click the latest green **Build APK** run, download **lane-apk** under *Artifacts* and unzip it.
+1. Download `lane.apk` from the latest release: [github.com/MichielVerhaegen/sport/releases/latest](https://github.com/MichielVerhaegen/sport/releases/latest).
 2. Copy the APK to your phone (Drive, email, cable) and open it. Allow *Install unknown apps* for the app you opened it with. Updates install over the old version and keep your data.
 3. Open Lane and tap **Turn on reminders**.
 4. Recommended: in Android settings, set Lane's battery usage to *Unrestricted*, otherwise some phones delay reminders.
 5. **Settings → Google Calendar → Sign in with Google**. Pick your account and allow calendar access. That's all: Lane now plans sessions around your meetings and detects your home days.
+6. Train without a gym? **Settings → Training → I usually train at home**. Every session then shows its no-equipment version. You can switch per day on the Today tab.
+
+Lane checks for new builds a few times a day. When there's one, the Today tab shows a **Download** button; install the file over the old app and your data stays.
 
 Lane only sees your own calendar and only adds events you ask for. **Sign out** in Settings revokes access.
 
@@ -23,7 +26,7 @@ Lane only sees your own calendar and only adds events you ask for. **Sign out** 
 - **Fresh start**: a Monday message after a slipped week.
 
 ### Train
-The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday musical, Wednesday calisthenics, Thursday upper body, Friday knee-friendly legs and grip, Saturday swim, Sunday rest and weigh-in. Open a day to see the exercises. **Add next 7 days to calendar** puts the sessions in Google Calendar at the planned times; they're tagged so they're never added twice.
+The week: Monday short upper body (only if you rehearsed on Sunday), Tuesday musical, Wednesday calisthenics, Thursday upper body, Friday knee-friendly legs and grip, Saturday swim, Sunday rest and weigh-in. Open a day to see the exercises. Each gym or pool session has a **home version** without equipment (push-ups, towel rows, a loaded backpack, a walk or cycle instead of the swim): tick *At home* on that day. **Add next 7 days to calendar** puts the sessions in Google Calendar at the planned times; they're tagged so they're never added twice.
 
 ### Food: the 30-day filling diet
 Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, each from one big bowl filled to the top with approved foods, no snacking, no calorie counting.
@@ -38,7 +41,7 @@ Based on *The 30-Day Filling Diet* by Built With Science. Three meals a day, eac
 Weekly weigh-in with an optional photo, percentage towards your goal, kg lost and to go, BMI, streak, a graph, and your first photo next to your latest. A warning shows if you lose more than about 1 kg a week.
 
 ### Settings
-Your start, goal and height; reminder times; habit tricks (a reward you only allow while training, a habit stack); Google Calendar; diet bowl size and start date; backup.
+Your start, goal and height; reminder times; training at home by default; habit tricks (a reward you only allow while training, a habit stack); Google Calendar; diet bowl size and start date; backup; app updates (which build you have, check now).
 
 ### Your data
 Everything stays on your phone. Nothing is sent anywhere except your own Google Calendar when you sign in. Use **Settings → Export backup** now and then; sign-in tokens are left out of backups.
@@ -46,7 +49,7 @@ Everything stays on your phone. Nothing is sent anywhere except your own Google 
 ## 3. For the app owner
 
 ### Build the APK
-Every push to `main` runs the **Build APK** workflow on GitHub Actions (5–8 minutes). You can also start it by hand: **Actions → Build APK → Run workflow**. Download **lane-apk** from the run.
+Every push to `main` runs the **Build APK** workflow on GitHub Actions (about 3 minutes). It publishes a GitHub **release** `build-N` with `lane.apk` attached, and bakes build number N into the app; that's how installed apps notice a new build. You can also start a build by hand (**Actions → Build APK → Run workflow**); on branches other than `main` it only produces the **lane-apk** artifact, no release.
 
 The signing key lives in `keystore/lane.keystore`, so every build installs over the previous one. The first build created it; if your organization blocks workflows from pushing, allow it under **Settings → Actions → General → Workflow permissions → Read and write**.
 
