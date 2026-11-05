@@ -2,7 +2,10 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS } from './content.js';
+import { Browser } from '@capacitor/browser';
+import { App as CapApp } from '@capacitor/app';
+import { GOOGLE_CLIENT_ID, REDIRECT_URI } from './config.js';
+import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
 const STORE = 'lane-state-v1';
@@ -34,6 +37,9 @@ const DEFAULTS = () => ({
   },
   weeks: {}, checkins: {}, sessions: {}, micro: {}, rehearsed: {}, homeManual: {},
   weights: [], ifthen: [], calendar: null,
+  google: null,
+  diet: { start: '', bowl: 'large' },
+  mealPlan: {}, mealLog: {}, dietTips: {}, shop: {},
 });
 
 function load() {
@@ -41,7 +47,7 @@ function load() {
     const raw = localStorage.getItem(STORE);
     if (!raw) return DEFAULTS();
     const s = JSON.parse(raw); const d = DEFAULTS();
-    return { ...d, ...s, profile: { ...d.profile, ...s.profile }, settings: { ...d.settings, ...s.settings } };
+    return { ...d, ...s, profile: { ...d.profile, ...s.profile }, settings: { ...d.settings, ...s.settings }, diet: { ...d.diet, ...s.diet } };
   } catch { return DEFAULTS(); }
 }
 let S = load();
@@ -178,6 +184,62 @@ function microSlots(date) {
     .filter((m) => m.start);
 }
 
+/* ---------------- food: diet, meal plan, shopping list ---------------- */
+const recipeById = (id) => RECIPES.find((r) => r.id === id);
+const OWN = { id: 'own', title: 'Own bowl', kcal: 0, protein: 0, own: true };
+const mixById = (id) => MIXES.find((m) => m.id === id);
+const mixItems = (m) => [...m.protein, ...m.volume, m.fat, ...m.flavor];
+const mealOf = (id) => {
+  if (id === 'own') return OWN;
+  if (id && id.startsWith('mix:')) { const m = mixById(id.slice(4)); return m ? { ...m, id, own: true, mix: true } : null; }
+  return recipeById(id);
+};
+function dietDay() { return S.diet.start ? Math.round((today() - parseYmd(S.diet.start)) / 864e5) + 1 : 0; }
+function plannedMeals(date) {
+  const day = S.mealPlan[ymd(date)] || {};
+  return SLOTS.map(([slot, label]) => ({ slot, label, meal: day[slot] ? mealOf(day[slot]) : null }));
+}
+function dayTotals(date) {
+  return plannedMeals(date).reduce((t, m) => (m.meal && !m.meal.own ? { kcal: t.kcal + m.meal.kcal, protein: t.protein + m.meal.protein } : t), { kcal: 0, protein: 0 });
+}
+const weekPlanCount = (monday) => { let n = 0; for (let i = 0; i < 7; i++) n += plannedMeals(addDays(monday, i)).filter((m) => m.meal).length; return n; };
+function autofillWeek(monday) {
+  const use = {};
+  for (let i = 0; i < 7; i++) plannedMeals(addDays(monday, i)).forEach((m) => { if (m.meal && !m.meal.own) use[m.meal.id] = (use[m.meal.id] || 0) + 1; });
+  for (let i = 0; i < 7; i++) {
+    const k = ymd(addDays(monday, i)); const day = (S.mealPlan[k] = S.mealPlan[k] || {});
+    for (const [slot] of SLOTS) {
+      if (day[slot]) continue;
+      const prev = i > 0 ? (S.mealPlan[ymd(addDays(monday, i - 1))] || {})[slot] : null;
+      const pick = RECIPES.filter((r) => r.slots.includes(slot))
+        .sort((a, b) => (use[a.id] || 0) - (use[b.id] || 0) || (a.id === prev) - (b.id === prev))[0];
+      if (pick) { day[slot] = pick.id; use[pick.id] = (use[pick.id] || 0) + 1; }
+    }
+  }
+}
+const PLURAL = { bag: 'bags', serving: 'servings', packet: 'packets', cup: 'cups' };
+function fmtQty(q, u) {
+  const n = Math.round(q * 10) / 10;
+  if (u === 'pc') return String(n);
+  return `${n} ${n > 1 && PLURAL[u] ? PLURAL[u] : u}`;
+}
+const fmtIng = ([n, q, u, note]) => (q == null ? `${n}, ${note}` : `${fmtQty(q, u)} ${n}${note ? ` (${note})` : ''}`);
+function shoppingList(monday) {
+  const from = ymd(today()); const items = {}; const pantry = new Set(); const mixes = new Set();
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(monday, i); if (ymd(date) < from) continue;
+    plannedMeals(date).forEach(({ meal }) => {
+      if (meal && meal.mix) { mixItems(meal).forEach((x) => mixes.add(x)); return; }
+      if (!meal || meal.own) return;
+      meal.ingredients.forEach(([n, q, u]) => {
+        if (q == null) { pantry.add(n); return; }
+        const key = `${n}|${u}`; items[key] = items[key] || { key, n, u, q: 0 }; items[key].q += q;
+      });
+    });
+  }
+  return { items: Object.values(items).sort((a, b) => a.n.localeCompare(b.n)), pantry: [...pantry].sort(), mixes: [...mixes].sort() };
+}
+
 /* ---------------- motivation ---------------- */
 function motivation(st, seed) {
   const lines = [`You're ${st.pct}% of the way to ${st.goal} kg.`, `${st.toGo} kg to go. Steady beats fast.`];
@@ -234,6 +296,7 @@ function buildSchedule() {
     if (wd === 0) {
       push(atTime(date, S.settings.weighTime), 'Sunday weigh-in', 'Once a week, same time. Add a photo if you like. Future-you will want it.');
       if (!S.weeks[ymd(addDays(date, 1))]) push(atTime(date, '18:00'), 'Pick your week', 'Training week or food week? One tap, and it is decided.');
+      if (!weekPlanCount(addDays(mondayOf(date), 7))) push(atTime(date, '17:30'), 'Plan your meals', 'Next week has no meals planned. Auto-fill it in one tap and get the shopping list.');
     }
     if (wd === 1) {
       const prevMonday = addDays(date, -7);
@@ -258,19 +321,143 @@ async function reschedule() {
   } catch (e) { console.warn('Scheduling failed', e); }
 }
 
-/* ---------------- calendar bridge (Google Apps Script) ---------------- */
+/* ---------------- Google sign-in and calendar ---------------- */
+const TAG = '#lane-app';
+const SCOPES = 'openid email https://www.googleapis.com/auth/calendar.events';
+const OAUTH = 'lane-oauth';
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const randomString = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
+const signedIn = () => !!(S.google && S.google.refresh);
+const legacyBridge = () => !!(S.settings.bridgeUrl && S.settings.bridgeKey);
+const calendarReady = () => signedIn() || legacyBridge();
+
+async function googleSignIn() {
+  if (!isNative) { toast('Sign-in works in the installed app.'); return; }
+  if (!GOOGLE_CLIENT_ID) { toast('Google sign-in is not set up yet. See the README.'); return; }
+  const verifier = randomString(48); const state = randomString(16);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  localStorage.setItem(OAUTH, JSON.stringify({ verifier, state }));
+  const q = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: 'code', scope: SCOPES,
+    code_challenge: challenge, code_challenge_method: 'S256', state, access_type: 'offline', prompt: 'consent',
+  });
+  await Browser.open({ url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` });
+}
+
+async function tokenRequest(params) {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, ...params }),
+  });
+  const data = await res.json();
+  if (!res.ok) { const e = new Error(data.error_description || data.error || 'Google sign-in failed'); e.code = data.error; throw e; }
+  return data;
+}
+
+async function handleRedirect(url) {
+  if (!url || !url.startsWith(REDIRECT_URI)) return;
+  try { await Browser.close(); } catch {}
+  const q = new URL(url.replace(REDIRECT_URI, 'https://x/cb')).searchParams;
+  let saved; try { saved = JSON.parse(localStorage.getItem(OAUTH)); } catch {}
+  localStorage.removeItem(OAUTH);
+  if (q.get('error')) { toast(q.get('error') === 'access_denied' ? 'Sign-in cancelled.' : `Google said: ${q.get('error')}`); return; }
+  if (!saved || saved.state !== q.get('state') || !q.get('code')) { toast('Sign-in could not be verified. Try again.'); return; }
+  try {
+    const t = await tokenRequest({ grant_type: 'authorization_code', code: q.get('code'), code_verifier: saved.verifier, redirect_uri: REDIRECT_URI });
+    let email = '';
+    try { email = JSON.parse(atob(t.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).email || ''; } catch {}
+    S.google = { access: t.access_token, expires: Date.now() + t.expires_in * 1000, refresh: t.refresh_token || (S.google && S.google.refresh) || '', email };
+    if (!S.google.refresh) throw new Error('Google did not allow ongoing access. Try signing in again.');
+    save(); toast(`Signed in${email ? ` as ${email}` : ''}`); render(); refreshCalendar(true);
+  } catch (e) { toast(e.message); }
+}
+
+function googleSignOut() {
+  const t = S.google && (S.google.refresh || S.google.access);
+  if (t) fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: t }) }).catch(() => {});
+  S.google = null; S.calendar = null; save(); render(); toast('Signed out');
+}
+
+async function accessToken() {
+  if (!signedIn()) throw new Error('Sign in with Google in Settings first.');
+  if (S.google.expires > Date.now() + 60000) return S.google.access;
+  try {
+    const t = await tokenRequest({ grant_type: 'refresh_token', refresh_token: S.google.refresh });
+    S.google.access = t.access_token; S.google.expires = Date.now() + t.expires_in * 1000; save();
+    return S.google.access;
+  } catch (e) {
+    if (e.code === 'invalid_grant') { S.google = null; save(); render(); throw new Error('Google sign-in expired. Please sign in again.'); }
+    throw e;
+  }
+}
+
+async function gcal(path, opts = {}) {
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/${path}`, {
+    ...opts, headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data.error && data.error.message) || 'Google Calendar answered with an error.');
+  return data;
+}
+
+async function googleWeek(days) {
+  const start = today(); const end = addDays(start, days);
+  const map = {}; const order = [];
+  for (let i = 0; i < days; i++) { const k = ymd(addDays(start, i)); map[k] = { date: k, location: null, ooo: false, busy: [] }; order.push(k); }
+  const datesOf = (ev) => {
+    if (ev.start.date) { const out = []; for (let d = parseYmd(ev.start.date); d < parseYmd(ev.end.date); d = addDays(d, 1)) out.push(ymd(d)); return out; }
+    return [ymd(new Date(ev.start.dateTime))];
+  };
+  let pageToken;
+  do {
+    const q = new URLSearchParams({ timeMin: start.toISOString(), timeMax: end.toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
+    ['default', 'workingLocation', 'outOfOffice', 'focusTime'].forEach((t) => q.append('eventTypes', t));
+    if (pageToken) q.set('pageToken', pageToken);
+    const r = await gcal(`events?${q}`);
+    (r.items || []).forEach((ev) => {
+      if (!ev.start || ev.status === 'cancelled') return;
+      if (ev.eventType === 'workingLocation') {
+        const t = ev.workingLocationProperties && ev.workingLocationProperties.type;
+        const loc = t === 'homeOffice' ? 'home' : t === 'officeLocation' ? 'office' : 'other';
+        datesOf(ev).forEach((k) => { if (map[k]) map[k].location = loc; });
+        return;
+      }
+      if (ev.transparency === 'transparent') return;
+      if ((ev.attendees || []).some((a) => a.self && a.responseStatus === 'declined')) return;
+      if (ev.start.date) { if (ev.eventType === 'outOfOffice') datesOf(ev).forEach((k) => { if (map[k]) map[k].ooo = true; }); return; }
+      const k = ymd(new Date(ev.start.dateTime));
+      if (map[k]) map[k].busy.push({ s: ev.start.dateTime, e: ev.end.dateTime, lane: String(ev.description || '').includes(TAG) });
+    });
+    pageToken = r.nextPageToken;
+  } while (pageToken);
+  return { ok: true, days: order.map((k) => map[k]) };
+}
+
+async function googleAdd({ title, start, end, desc }) {
+  const q = new URLSearchParams({ timeMin: start.toISOString(), timeMax: end.toISOString(), singleEvents: 'true', maxResults: '50' });
+  const existing = await gcal(`events?${q}`);
+  if ((existing.items || []).some((ev) => ev.summary === title && ev.start.dateTime && new Date(ev.start.dateTime).getTime() === start.getTime())) return { skipped: true };
+  await gcal('events', { method: 'POST', body: JSON.stringify({ summary: title, description: `${desc || ''}\n\n${TAG}`, start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } }) });
+  return { created: true };
+}
+
+// Legacy: Google Apps Script bridge, kept for anyone who already set it up.
 async function bridge(params) {
   const { bridgeUrl, bridgeKey } = S.settings;
-  if (!bridgeUrl || !bridgeKey) throw new Error('Calendar is not connected yet. Add the link and key in Settings.');
+  if (!bridgeUrl || !bridgeKey) throw new Error('Calendar is not connected yet. Sign in with Google in Settings.');
   const q = new URLSearchParams({ ...params, key: bridgeKey });
   const res = await fetch(`${bridgeUrl}?${q}`, { redirect: 'follow' });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'The calendar link answered with an error.');
   return data;
 }
+const calendarWeek = (days) => (signedIn() ? googleWeek(days) : bridge({ action: 'week', days }));
+const calendarAdd = (it) => (signedIn() ? googleAdd(it)
+  : bridge({ action: 'add', title: it.title, start: it.start.toISOString(), end: it.end.toISOString(), desc: it.desc }));
+
 async function refreshCalendar(silent) {
   try {
-    const data = await bridge({ action: 'week', days: 10 });
+    const data = await calendarWeek(10);
     S.calendar = { fetchedAt: Date.now(), days: data.days }; save(); render();
     if (!silent) toast('Calendar updated');
   } catch (e) { if (!silent) toast(e.message); }
@@ -284,10 +471,7 @@ async function addWeekToCalendar() {
     if (slot) items.push({ title: `Lane: ${w.title}`, start: slot.start, end: slot.end, desc: w.exercises.map((e) => `${e[0]}: ${e[1]}`).join('\n') });
     if (S.settings.addMicro) microSlots(date).forEach((m) => items.push({ title: `Lane: ${m.ex[0]}`, start: m.start, end: new Date(m.start.getTime() + 10 * MIN), desc: m.ex[1] }));
     for (const it of items) {
-      try {
-        const r = await bridge({ action: 'add', title: it.title, start: it.start.toISOString(), end: it.end.toISOString(), desc: it.desc });
-        r.skipped ? skipped++ : created++;
-      } catch { failed++; }
+      try { const r = await calendarAdd(it); r.skipped ? skipped++ : created++; } catch { failed++; }
     }
   }
   toast(`${created} added${skipped ? `, ${skipped} already there` : ''}${failed ? `, ${failed} failed` : ''}`);
@@ -298,7 +482,7 @@ async function addWeekToCalendar() {
 async function exportBackup() {
   const pics = {};
   for (const w of S.weights) if (w.photoId) { const p = await photos.get(w.photoId); if (p) pics[w.photoId] = p; }
-  const json = JSON.stringify({ app: 'lane', version: 1, state: S, photos: pics });
+  const json = JSON.stringify({ app: 'lane', version: 1, state: { ...S, google: null }, photos: pics });
   const name = `lane-backup-${ymd(today())}.json`;
   if (isNative) {
     const f = await Filesystem.writeFile({ path: name, data: json, directory: Directory.Cache, encoding: Encoding.UTF8 });
@@ -312,12 +496,12 @@ async function importBackup(file) {
     const data = JSON.parse(await file.text());
     if (data.app !== 'lane') throw new Error();
     for (const [k, v] of Object.entries(data.photos || {})) await photos.set(k, v);
-    S = { ...DEFAULTS(), ...data.state }; save(); render(); toast('Backup restored');
+    S = { ...DEFAULTS(), ...data.state, google: S.google }; save(); render(); toast('Backup restored');
   } catch { toast('That file is not a Lane backup.'); }
 }
 
 /* ---------------- UI helpers ---------------- */
-let tab = 'today'; let openDay = null; let showMissForm = false;
+let tab = 'today'; let openDay = null; let showMissForm = false; let planOffset = 0;
 const app = document.getElementById('app');
 function toast(msg) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
@@ -406,6 +590,20 @@ function viewToday() {
   }
   h += `</section>`;
 
+  // meals
+  const dd = dietDay(); const tips = S.dietTips[k] || {}; const log = S.mealLog[k] || {};
+  h += `<section><h2>Today's meals</h2>`;
+  h += `<p class="sub">${dd >= 1 && dd <= DIET.days ? `Day ${dd} of ${DIET.days} of the filling diet. ` : ''}One bowl per meal, filled to the top. No snacking.</p><ul class="micro">`;
+  plannedMeals(d).forEach(({ slot, label, meal }) => {
+    if (!meal) { h += `<li class="sub meal-empty">${label}: not planned</li>`; return; }
+    h += `<li><label><input type="checkbox" data-action="meal" data-slot="${slot}" ${log[slot] ? 'checked' : ''}><span><b>${label}</b> ${esc(meal.title)}${meal.own ? '' : `, ${meal.kcal} kcal, ${meal.protein} g protein`}${meal.mix ? `<br><span class="sub">${esc(mixItems(meal).join(', '))}</span>` : ''}</span></label></li>`;
+  });
+  h += `</ul><details><summary>Extra strategies</summary>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="soda" ${tips.soda ? 'checked' : ''}> Zero-calorie fizzy drink with each meal</label>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="broth" ${tips.broth ? 'checked' : ''}> Broth with one meal</label>
+    <label class="toggle"><input type="checkbox" data-action="tip" data-tip="utensil" ${tips.utensil ? 'checked' : ''}> Small utensil (chopsticks or teaspoon)</label></details>
+    <button class="link" data-action="goFood">Plan meals and shopping list</button></section>`;
+
   // home day
   const home = isHome(k); const slots = microSlots(d);
   h += `<section><h2>Home day moves</h2>`;
@@ -429,7 +627,7 @@ function viewToday() {
 }
 
 function viewTrain() {
-  const mon = mondayOf(today()); const ws = weekStatus(mon); const connected = S.settings.bridgeUrl && S.settings.bridgeKey;
+  const mon = mondayOf(today()); const ws = weekStatus(mon); const connected = calendarReady();
   let h = `<header><h1>This week</h1><p class="sub">${ws.mode === 'training' ? `Training week: ${ws.sessions} of 2 sessions done` : ws.mode === 'food' ? `Food week: ${ws.yes} of 5 good days` : 'Pick your week on the Today tab'}</p></header>`;
   h += `<ol class="week">`;
   for (let i = 0; i < 7; i++) {
@@ -447,12 +645,97 @@ function viewTrain() {
   if (connected) {
     h += `<p class="sub">${S.calendar ? `Last synced ${new Date(S.calendar.fetchedAt).toLocaleString()}.` : 'Not synced yet.'} Sessions are placed in free time around your meetings.</p>
       <div class="row"><button class="btn" data-action="addCal">Add next 7 days to calendar</button><button class="btn ghost" data-action="refreshCal">Sync now</button></div>`;
-  } else h += `<p class="sub">Connect your calendar in Settings so sessions fit around your meetings and home days are detected.</p>`;
+  } else h += `<p class="sub">Sign in with Google in Settings so sessions fit around your meetings and home days are detected.</p>`;
   h += `</section><section><h2>Ground rules</h2><ul class="plain">
     <li>Stop 1–2 reps before failure. Consistency beats heroics.</li>
     <li>Knee pain above 3 out of 10: stop that exercise for today.</li>
     <li>Neck training only with a trainer showing you the form.</li>
     <li>Aim to lose at most about 1 kg a week so it's fat, not muscle.</li></ul></section>`;
+  return h;
+}
+
+function viewFood() {
+  const d = today(); const day = dietDay(); const mon = addDays(mondayOf(d), planOffset * 7);
+  const bowl = DIET.bowls[S.diet.bowl] || DIET.bowls.large;
+  let h = `<header><h1>Food</h1><p class="sub">The 30-day filling diet: lose fat without going hungry.</p></header>`;
+
+  // diet status
+  h += `<div class="lane">`;
+  if (!day) {
+    h += `<p><b>Ready when you are.</b> Three meals a day, each from one big bowl, filled to the top with approved foods.</p>
+      <button class="btn" data-action="startDiet">Start day 1 today</button>`;
+  } else if (day <= DIET.days) {
+    h += `<div class="lane-head"><span class="pct">${day}<small>/${DIET.days}</small></span><span class="lane-cap">days of the filling diet<br><b>${bowl.label}</b></span></div>
+      <div class="rope"><div class="rope-done" style="width:${Math.round((day / DIET.days) * 100)}%"></div><div class="swimmer" style="left:${Math.round((day / DIET.days) * 100)}%"></div></div>`;
+  } else {
+    h += `<p class="ok">30 days done.</p><p class="sub">Weigh in, then keep going with the same bowl, or restart.</p>
+      <button class="btn ghost" data-action="startDiet">Restart from today</button>`;
+  }
+  h += `</div>`;
+  h += `<p class="sub care">${esc(DIET.careNote)}</p>`;
+
+  // planner
+  const totalPlanned = weekPlanCount(mon);
+  h += `<section><h2>Meal plan</h2>
+    <div class="seg" role="group" aria-label="Week">
+      <button data-action="planWeek" data-off="0" aria-pressed="${planOffset === 0}">This week</button>
+      <button data-action="planWeek" data-off="1" aria-pressed="${planOffset === 1}">Next week</button></div>
+    <ol class="plan">`;
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(mon, i); const k = ymd(date); const t = dayTotals(date); const plan = S.mealPlan[k] || {};
+    h += `<li class="${k === ymd(d) ? 'is-today' : ''}"><div class="plan-head"><b>${DAYS[date.getDay()].slice(0, 3)} ${date.getDate()}</b>${t.kcal ? `<span class="sub">${t.kcal} kcal, ${t.protein} g protein</span>` : ''}</div>`;
+    SLOTS.forEach(([slot, label]) => {
+      h += `<label class="slot"><span>${label}</span><select data-action="plan" data-date="${k}" data-slot="${slot}" aria-label="${label} on ${DAYS[date.getDay()]} ${date.getDate()}">
+        <option value="">Not planned</option>
+        ${RECIPES.map((r) => `<option value="${r.id}" ${plan[slot] === r.id ? 'selected' : ''}>${esc(r.title)}</option>`).join('')}
+        <optgroup label="Bowl mixes">${MIXES.filter((m) => m.slots.includes(slot)).map((m) => `<option value="mix:${m.id}" ${plan[slot] === `mix:${m.id}` ? 'selected' : ''}>${esc(m.title)}</option>`).join('')}</optgroup>
+        <option value="own" ${plan[slot] === 'own' ? 'selected' : ''}>Own bowl (approved foods)</option></select></label>`;
+    });
+    h += `</li>`;
+  }
+  h += `</ol><div class="row"><button class="btn" data-action="autofill">Auto-fill empty meals</button>${totalPlanned ? '<button class="btn ghost" data-action="clearWeek">Clear week</button>' : ''}</div></section>`;
+
+  // shopping list
+  const shop = shoppingList(mon); const checked = S.shop[ymd(mon)] || {};
+  h += `<section><h2>Shopping list</h2>`;
+  if (!shop.items.length && !shop.mixes.length) h += `<p class="sub">Plan some meals and the list builds itself${planOffset === 0 ? ' (from today onward)' : ''}.</p>`;
+  else {
+    h += `<ul class="micro">${shop.items.map((it) => `<li><label><input type="checkbox" data-action="shop" data-week="${ymd(mon)}" data-key="${esc(it.key)}" ${checked[it.key] ? 'checked' : ''}><span class="${checked[it.key] ? 'got' : ''}">${esc(it.n)}, <b>${fmtQty(it.q, it.u)}</b></span></label></li>`).join('')}</ul>`;
+    if (shop.mixes.length) h += `<p class="sub">For your bowl mixes (amounts are up to you, within the rules): ${esc(shop.mixes.join(', ').toLowerCase())}.</p>`;
+    if (shop.pantry.length) h += `<p class="sub">Have at hand: ${esc(shop.pantry.join(', ').toLowerCase())}.</p>`;
+    h += `<button class="link" data-action="shopReset" data-week="${ymd(mon)}">Uncheck everything</button>`;
+  }
+  h += `</section>`;
+
+  // bowl mixes
+  h += `<section><h2>Bowl mixes</h2><p class="sub">Ingredients that work together, built only from the approved list: protein, a big volume base, one fat pick, and flavour. Pick them in the meal plan above.</p>`;
+  MIXES.forEach((m) => {
+    h += `<details><summary>${esc(m.title)}<span class="sub"> ${m.slots.join(' / ')}</span></summary>
+      <dl class="mix"><dt>Protein</dt><dd>${esc(m.protein.join(', '))}</dd><dt>Volume</dt><dd>${esc(m.volume.join(', '))}</dd>
+      <dt>Fat (pick 1)</dt><dd>${esc(m.fat)}</dd><dt>Flavour</dt><dd>${esc(m.flavor.join(', '))}</dd></dl>
+      <p class="sub">${esc(m.tip)}</p></details>`;
+  });
+  h += `</section>`;
+
+  // recipes
+  h += `<section><h2>Recipes</h2><p class="sub">Each makes one bowl.</p>`;
+  RECIPES.forEach((r) => {
+    h += `<details><summary>${esc(r.title)}<span class="sub"> ${r.kcal} kcal, ${r.protein} g protein</span></summary>
+      <p class="sub">${r.kcal} kcal · ${r.protein} g protein · ${r.carbs} g carbs · ${r.fat} g fat</p>
+      <ul class="plain">${r.ingredients.map((i) => `<li>${esc(fmtIng(i))}</li>`).join('')}</ul>
+      <ol class="steps">${r.steps.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol></details>`;
+  });
+  h += `</section>`;
+
+  // guide
+  h += `<section><h2>Diet guide</h2>
+    <details><summary>The three rules</summary><ol class="steps">${DIET.rules.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol>
+      <p class="sub">Your bowl: ${esc(bowl.label)}, ${esc(bowl.detail)}. Change it in Settings.</p></details>
+    <details><summary>Approved foods</summary>${DIET.foods.map((c) => `<h3>${esc(c.name)} <span class="sub">${esc(c.amount)}</span></h3>
+      ${c.groups.map(([label, items]) => `<p>${label ? `<b>${esc(label)}:</b> ` : ''}${items.map(esc).join(', ')}.</p>`).join('')}`).join('')}</details>
+    <details><summary>Extra strategies</summary><ol class="steps">${DIET.strategies.map(([a, b]) => `<li><b>${esc(a)}.</b> ${esc(b)}</li>`).join('')}</ol></details>
+    <details><summary>FAQ</summary>${DIET.faq.map(([q, a]) => `<p><b>${esc(q)}</b><br>${esc(a)}</p>`).join('')}</details>
+    <p class="sub">Based on the 30-Day Filling Diet by Built With Science. For personal use.</p></section>`;
   return h;
 }
 
@@ -522,18 +805,26 @@ function viewSettings() {
     ${field('settings.bundle', 'Reward you only allow while training (temptation bundle)', 'text', 'placeholder="my favourite podcast"')}
     ${field('settings.stackAfter', 'Habit stack: after…', 'text', 'placeholder="my morning coffee"')}
     ${field('settings.stackDo', '…I do', 'text', 'placeholder="10 push-ups"')}</div></section>
-  <section><h2>Google Calendar</h2><p class="sub">Paste the web app link and key from your Apps Script setup (see the README).</p><div class="form">
-    ${field('settings.bridgeUrl', 'Web app link', 'url', 'placeholder="https://script.google.com/macros/s/…/exec"')}
-    ${field('settings.bridgeKey', 'Key', 'text', 'autocomplete="off"')}
-    <label class="toggle"><input type="checkbox" data-bind="settings.addMicro" ${s.addMicro ? 'checked' : ''}> Also add home-day move breaks to my calendar</label>
-    <button class="btn ghost" data-action="refreshCal">Test and sync</button></div></section>
+  <section><h2>Google Calendar</h2>
+    ${signedIn()
+      ? `<p>Signed in${S.google.email ? ` as <b>${esc(S.google.email)}</b>` : ''}.</p><p class="sub">Lane reads your meetings and working location, and adds sessions to your calendar.</p>
+         <div class="row"><button class="btn ghost" data-action="refreshCal">Sync now</button><button class="btn ghost" data-action="googleOut">Sign out</button></div>`
+      : `<p class="sub">Sign in once with your Google account so sessions fit around your meetings and home days are detected.</p>
+         <button class="btn" data-action="googleIn">Sign in with Google</button>`}
+    ${calendarReady() ? `<label class="toggle"><input type="checkbox" data-bind="settings.addMicro" ${s.addMicro ? 'checked' : ''}> Also add home-day move breaks to my calendar</label>` : ''}
+    <details><summary>Advanced: Apps Script link</summary><p class="sub">Only if you set up the old Apps Script bridge. Sign-in above is simpler.</p><div class="form">
+      ${field('settings.bridgeUrl', 'Web app link', 'url', 'placeholder="https://script.google.com/macros/s/…/exec"')}
+      ${field('settings.bridgeKey', 'Key', 'text', 'autocomplete="off"')}</div></details></section>
+  <section><h2>Filling diet</h2><div class="form">
+    <label>Bowl size<select data-bind="diet.bowl">${Object.entries(DIET.bowls).map(([id, b]) => `<option value="${id}" ${S.diet.bowl === id ? 'selected' : ''}>${esc(b.label)}</option>`).join('')}</select></label>
+    ${field('diet.start', 'Day 1 of the 30 days (empty = not started)', 'date')}</div></section>
   <section><h2>Backup</h2><p class="sub">Your data lives only on this phone. Export a backup now and then.</p>
     <div class="row"><button class="btn ghost" data-action="export">Export backup</button><label class="btn ghost file-btn">Restore backup<input id="import" type="file" accept="application/json,.json"></label></div>
     <button class="link danger" data-action="reset">Erase all data</button></section>`;
 }
 
 function render() {
-  const views = { today: viewToday, train: viewTrain, progress: viewProgress, settings: viewSettings };
+  const views = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, settings: viewSettings };
   app.innerHTML = views[tab]();
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
   app.querySelectorAll('img[data-photo]').forEach(async (img) => { const src = await photos.get(img.dataset.photo); if (src) img.src = src; });
@@ -560,6 +851,15 @@ app.addEventListener('click', async (e) => {
   else if (a === 'session') { S.sessions[k] = { done: true, kind: el.dataset.kind }; toast('Counted'); }
   else if (a === 'sessionUndo') { delete S.sessions[k]; }
   else if (a === 'goDay') { openDay = el.dataset.day; tab = 'train'; render(); return; }
+  else if (a === 'goFood') { tab = 'food'; planOffset = 0; render(); window.scrollTo(0, 0); return; }
+  else if (a === 'startDiet') { S.diet.start = k; toast('Day 1. One bowl, filled to the top.'); }
+  else if (a === 'planWeek') { planOffset = +el.dataset.off; render(); return; }
+  else if (a === 'autofill') { autofillWeek(addDays(mondayOf(today()), planOffset * 7)); toast('Meals filled in'); }
+  else if (a === 'clearWeek') {
+    if (!confirm('Clear all meals this week?')) return;
+    for (let i = 0; i < 7; i++) delete S.mealPlan[ymd(addDays(addDays(mondayOf(today()), planOffset * 7), i))];
+  }
+  else if (a === 'shopReset') { delete S.shop[el.dataset.week]; }
   else if (a === 'perm') { askPermission(); return; }
   else if (a === 'weigh') {
     const kg = parseFloat(document.getElementById('kg').value);
@@ -577,6 +877,8 @@ app.addEventListener('click', async (e) => {
     const w = S.weights.find((x) => x.date === el.dataset.date); if (w && w.photoId) photos.del(w.photoId);
     S.weights = S.weights.filter((x) => x.date !== el.dataset.date);
   }
+  else if (a === 'googleIn') { googleSignIn().catch((e) => toast(e.message)); return; }
+  else if (a === 'googleOut') { if (!confirm('Sign out of Google?')) return; googleSignOut(); return; }
   else if (a === 'refreshCal') { refreshCalendar(false); return; }
   else if (a === 'addCal') { addWeekToCalendar(); return; }
   else if (a === 'testNotif') {
@@ -600,6 +902,14 @@ app.addEventListener('change', async (e) => {
     return;
   }
   const a = el.dataset.action;
+  if (a === 'plan') {
+    const day = (S.mealPlan[el.dataset.date] = S.mealPlan[el.dataset.date] || {});
+    if (el.value) day[el.dataset.slot] = el.value; else delete day[el.dataset.slot];
+    save(); render(); return;
+  }
+  if (a === 'meal') { S.mealLog[k] = S.mealLog[k] || {}; S.mealLog[k][el.dataset.slot] = el.checked; save(); return; }
+  if (a === 'tip') { S.dietTips[k] = S.dietTips[k] || {}; S.dietTips[k][el.dataset.tip] = el.checked; save(); return; }
+  if (a === 'shop') { S.shop[el.dataset.week] = S.shop[el.dataset.week] || {}; S.shop[el.dataset.week][el.dataset.key] = el.checked; save(); render(); return; }
   if (a === 'micro') { S.micro[k] = S.micro[k] || [false, false, false]; S.micro[k][+el.dataset.i] = el.checked; save(); return; }
   if (a === 'homeToggle') { S.homeManual[k] = el.checked; save(); render(); return; }
   if (a === 'rehearsed') { S.rehearsed[el.dataset.key] = el.checked; save(); render(); return; }
@@ -614,11 +924,15 @@ async function start() {
   await checkPermission();
   if (!localStorage.getItem(STORE)) save();
   render(); reschedule();
-  if (S.settings.bridgeUrl && (!S.calendar || Date.now() - S.calendar.fetchedAt > 2 * 3600e3)) refreshCalendar(true);
+  if (isNative) {
+    CapApp.addListener('appUrlOpen', (e) => handleRedirect(e.url));
+    try { const l = await CapApp.getLaunchUrl(); if (l) handleRedirect(l.url); } catch {}
+  }
+  if (calendarReady() && (!S.calendar || Date.now() - S.calendar.fetchedAt > 2 * 3600e3)) refreshCalendar(true);
 }
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
   await checkPermission(); render(); reschedule();
-  if (S.settings.bridgeUrl && S.calendar && Date.now() - S.calendar.fetchedAt > 2 * 3600e3) refreshCalendar(true);
+  if (calendarReady() && S.calendar && Date.now() - S.calendar.fetchedAt > 2 * 3600e3) refreshCalendar(true);
 });
 start();
