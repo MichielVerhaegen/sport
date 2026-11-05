@@ -1,0 +1,10 @@
+{
+  "appId": "eu.michiel.lane",
+  "appName": "Lane",
+  "webDir": "www",
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#0B5C82"
+    }
+  }
+}
