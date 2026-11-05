@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES } from './content.js';
+import { WORKOUTS, MINIMUM, WEEK, MICRO, MICRO_WINDOWS, KIND_WORDS, DIET, SLOTS, RECIPES, MIXES } from './content.js';
 
 const isNative = Capacitor.isNativePlatform();
 const STORE = 'lane-state-v1';
@@ -183,7 +183,13 @@ function microSlots(date) {
 /* ---------------- food: diet, meal plan, shopping list ---------------- */
 const recipeById = (id) => RECIPES.find((r) => r.id === id);
 const OWN = { id: 'own', title: 'Own bowl', kcal: 0, protein: 0, own: true };
-const mealOf = (id) => (id === 'own' ? OWN : recipeById(id));
+const mixById = (id) => MIXES.find((m) => m.id === id);
+const mixItems = (m) => [...m.protein, ...m.volume, m.fat, ...m.flavor];
+const mealOf = (id) => {
+  if (id === 'own') return OWN;
+  if (id && id.startsWith('mix:')) { const m = mixById(id.slice(4)); return m ? { ...m, id, own: true, mix: true } : null; }
+  return recipeById(id);
+};
 function dietDay() { return S.diet.start ? Math.round((today() - parseYmd(S.diet.start)) / 864e5) + 1 : 0; }
 function plannedMeals(date) {
   const day = S.mealPlan[ymd(date)] || {};
@@ -215,10 +221,11 @@ function fmtQty(q, u) {
 }
 const fmtIng = ([n, q, u, note]) => (q == null ? `${n}, ${note}` : `${fmtQty(q, u)} ${n}${note ? ` (${note})` : ''}`);
 function shoppingList(monday) {
-  const from = ymd(today()); const items = {}; const pantry = new Set();
+  const from = ymd(today()); const items = {}; const pantry = new Set(); const mixes = new Set();
   for (let i = 0; i < 7; i++) {
     const date = addDays(monday, i); if (ymd(date) < from) continue;
     plannedMeals(date).forEach(({ meal }) => {
+      if (meal && meal.mix) { mixItems(meal).forEach((x) => mixes.add(x)); return; }
       if (!meal || meal.own) return;
       meal.ingredients.forEach(([n, q, u]) => {
         if (q == null) { pantry.add(n); return; }
@@ -226,7 +233,7 @@ function shoppingList(monday) {
       });
     });
   }
-  return { items: Object.values(items).sort((a, b) => a.n.localeCompare(b.n)), pantry: [...pantry].sort() };
+  return { items: Object.values(items).sort((a, b) => a.n.localeCompare(b.n)), pantry: [...pantry].sort(), mixes: [...mixes].sort() };
 }
 
 /* ---------------- motivation ---------------- */
@@ -464,7 +471,7 @@ function viewToday() {
   h += `<p class="sub">${dd >= 1 && dd <= DIET.days ? `Day ${dd} of ${DIET.days} of the filling diet. ` : ''}One bowl per meal, filled to the top. No snacking.</p><ul class="micro">`;
   plannedMeals(d).forEach(({ slot, label, meal }) => {
     if (!meal) { h += `<li class="sub meal-empty">${label}: not planned</li>`; return; }
-    h += `<li><label><input type="checkbox" data-action="meal" data-slot="${slot}" ${log[slot] ? 'checked' : ''}><span><b>${label}</b> ${esc(meal.title)}${meal.own ? '' : `, ${meal.kcal} kcal, ${meal.protein} g protein`}</span></label></li>`;
+    h += `<li><label><input type="checkbox" data-action="meal" data-slot="${slot}" ${log[slot] ? 'checked' : ''}><span><b>${label}</b> ${esc(meal.title)}${meal.own ? '' : `, ${meal.kcal} kcal, ${meal.protein} g protein`}${meal.mix ? `<br><span class="sub">${esc(mixItems(meal).join(', '))}</span>` : ''}</span></label></li>`;
   });
   h += `</ul><details><summary>Extra strategies</summary>
     <label class="toggle"><input type="checkbox" data-action="tip" data-tip="soda" ${tips.soda ? 'checked' : ''}> Zero-calorie fizzy drink with each meal</label>
@@ -556,6 +563,7 @@ function viewFood() {
       h += `<label class="slot"><span>${label}</span><select data-action="plan" data-date="${k}" data-slot="${slot}" aria-label="${label} on ${DAYS[date.getDay()]} ${date.getDate()}">
         <option value="">Not planned</option>
         ${RECIPES.map((r) => `<option value="${r.id}" ${plan[slot] === r.id ? 'selected' : ''}>${esc(r.title)}</option>`).join('')}
+        <optgroup label="Bowl mixes">${MIXES.filter((m) => m.slots.includes(slot)).map((m) => `<option value="mix:${m.id}" ${plan[slot] === `mix:${m.id}` ? 'selected' : ''}>${esc(m.title)}</option>`).join('')}</optgroup>
         <option value="own" ${plan[slot] === 'own' ? 'selected' : ''}>Own bowl (approved foods)</option></select></label>`;
     });
     h += `</li>`;
@@ -565,12 +573,23 @@ function viewFood() {
   // shopping list
   const shop = shoppingList(mon); const checked = S.shop[ymd(mon)] || {};
   h += `<section><h2>Shopping list</h2>`;
-  if (!shop.items.length) h += `<p class="sub">Plan some meals and the list builds itself${planOffset === 0 ? ' (from today onward)' : ''}.</p>`;
+  if (!shop.items.length && !shop.mixes.length) h += `<p class="sub">Plan some meals and the list builds itself${planOffset === 0 ? ' (from today onward)' : ''}.</p>`;
   else {
     h += `<ul class="micro">${shop.items.map((it) => `<li><label><input type="checkbox" data-action="shop" data-week="${ymd(mon)}" data-key="${esc(it.key)}" ${checked[it.key] ? 'checked' : ''}><span class="${checked[it.key] ? 'got' : ''}">${esc(it.n)}, <b>${fmtQty(it.q, it.u)}</b></span></label></li>`).join('')}</ul>`;
+    if (shop.mixes.length) h += `<p class="sub">For your bowl mixes (amounts are up to you, within the rules): ${esc(shop.mixes.join(', ').toLowerCase())}.</p>`;
     if (shop.pantry.length) h += `<p class="sub">Have at hand: ${esc(shop.pantry.join(', ').toLowerCase())}.</p>`;
     h += `<button class="link" data-action="shopReset" data-week="${ymd(mon)}">Uncheck everything</button>`;
   }
+  h += `</section>`;
+
+  // bowl mixes
+  h += `<section><h2>Bowl mixes</h2><p class="sub">Ingredients that work together, built only from the approved list: protein, a big volume base, one fat pick, and flavour. Pick them in the meal plan above.</p>`;
+  MIXES.forEach((m) => {
+    h += `<details><summary>${esc(m.title)}<span class="sub"> ${m.slots.join(' / ')}</span></summary>
+      <dl class="mix"><dt>Protein</dt><dd>${esc(m.protein.join(', '))}</dd><dt>Volume</dt><dd>${esc(m.volume.join(', '))}</dd>
+      <dt>Fat (pick 1)</dt><dd>${esc(m.fat)}</dd><dt>Flavour</dt><dd>${esc(m.flavor.join(', '))}</dd></dl>
+      <p class="sub">${esc(m.tip)}</p></details>`;
+  });
   h += `</section>`;
 
   // recipes
